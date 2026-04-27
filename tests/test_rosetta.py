@@ -1,0 +1,642 @@
+import numpy as np
+import pandas as pd
+import pytest
+import tempfile
+import xarray as xr
+
+# ---------------------------------------------------------------------------
+# 1. Catalog tests
+# ---------------------------------------------------------------------------
+
+def test_catalog_loads():
+    from rosetta import catalog
+    products = catalog.list_products()
+    assert len(products) > 0
+    for p in products:
+        cfg = catalog.info(p)
+        assert "adapter" in cfg
+        assert "variables" in cfg
+        assert "grid" in cfg
+
+
+def test_catalog_list_products():
+    from rosetta import catalog
+    products = catalog.list_products()
+    assert isinstance(products, list)
+    assert all(isinstance(p, str) for p in products)
+    assert "nmme/cfsv2" in products
+    assert "obs/chirps" in products
+
+
+def test_catalog_info():
+    from rosetta import catalog
+    info = catalog.info("nmme/cfsv2")
+    assert "adapter" in info
+    assert "variables" in info
+    assert info["adapter"] == "opendap"
+
+
+def test_catalog_info_missing():
+    from rosetta import catalog
+    with pytest.raises(KeyError):
+        catalog.info("nonexistent/product")
+
+
+def test_catalog_variable_mapping():
+    from rosetta import catalog
+    for product_name in catalog.list_products():
+        cfg = catalog.info(product_name)
+        for var_name, var_cfg in cfg["variables"].items():
+            assert "native_name" in var_cfg
+            assert "units" in var_cfg
+            assert "target_units" in var_cfg
+
+
+# ---------------------------------------------------------------------------
+# 2. Normalize tests
+# ---------------------------------------------------------------------------
+
+def test_normalize_renames_variables(synthetic_precip_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prate", "units": "kg m-2 s-1", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_precip_ds, config, "precip")
+    assert "precip" in result
+    assert "prate" not in result
+
+
+def test_normalize_standardizes_coords(synthetic_global_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prate", "units": "kg m-2 s-1", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_global_ds, config, "precip")
+    assert "lat" in result.dims
+    assert "lon" in result.dims
+    assert "latitude" not in result.dims
+    assert "longitude" not in result.dims
+
+
+def test_normalize_converts_units_k_to_c(synthetic_temp_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "temp": {"native_name": "2m_temperature", "units": "K", "target_units": "C"}
+        }
+    }
+    result = normalize(synthetic_temp_ds, config, "temp")
+    np.testing.assert_allclose(result["temp"].values.mean(), 26.85, atol=0.01)
+
+
+def test_normalize_converts_units_precip(synthetic_precip_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prate", "units": "kg m-2 s-1", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_precip_ds, config, "precip")
+    np.testing.assert_allclose(result["precip"].values.mean(), 86400.0, atol=1.0)
+
+
+def test_normalize_no_change_same_units():
+    from rosetta.normalize import normalize
+    lat = np.arange(-5, 5, 1.0)
+    lon = np.arange(30, 40, 1.0)
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"], np.full((10, 10), 5.0))},
+        coords={"lat": lat, "lon": lon},
+    )
+    config = {
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(ds, config, "precip")
+    np.testing.assert_allclose(result["precip"].values.mean(), 5.0)
+
+
+def test_normalize_subsets_region(synthetic_global_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prate", "units": "kg m-2 s-1", "target_units": "mm/day"}
+        }
+    }
+    region = [-12, 6, 28, 42]
+    result = normalize(synthetic_global_ds, config, "precip", region=region)
+    assert float(result.lat.min()) >= -12
+    assert float(result.lat.max()) <= 6
+    assert float(result.lon.min()) >= 28
+    assert float(result.lon.max()) <= 42
+
+
+def test_normalize_cf_compliance(synthetic_precip_ds):
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prate", "units": "kg m-2 s-1", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_precip_ds, config, "precip")
+    assert result["precip"].attrs["units"] == "mm/day"
+    assert result["lat"].attrs["axis"] == "Y"
+    assert result["lon"].attrs["axis"] == "X"
+
+
+# ---------------------------------------------------------------------------
+# 3. Storage tests
+# ---------------------------------------------------------------------------
+
+def test_save_netcdf_local():
+    from rosetta.storage import save
+    ds = xr.Dataset({"temp": (["lat", "lon"], np.random.rand(5, 5))})
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
+        path = f.name
+    save(ds, path, format="netcdf")
+    loaded = xr.open_dataset(path)
+    xr.testing.assert_equal(ds, loaded)
+    loaded.close()
+
+
+def test_save_unsupported_format_raises():
+    from rosetta.storage import save
+    ds = xr.Dataset({"temp": (["lat", "lon"], np.random.rand(5, 5))})
+    with pytest.raises(ValueError):
+        save(ds, "out.xyz", format="xyz")
+
+
+# ---------------------------------------------------------------------------
+# 4. Adapter base tests
+# ---------------------------------------------------------------------------
+
+def test_adapter_base_is_abstract():
+    from rosetta.adapters.base import AdapterBase
+    with pytest.raises(TypeError):
+        AdapterBase()
+
+
+def test_get_adapter_returns_correct_class():
+    from rosetta.adapters import get_adapter
+    from rosetta.adapters.cds import CDSAdapter
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    from rosetta.adapters.http import HTTPAdapter
+    assert isinstance(get_adapter("cds"), CDSAdapter)
+    assert isinstance(get_adapter("opendap"), OPeNDAPAdapter)
+    assert isinstance(get_adapter("http"), HTTPAdapter)
+
+
+def test_get_adapter_unknown_raises():
+    from rosetta.adapters import get_adapter
+    with pytest.raises(KeyError):
+        get_adapter("unknown")
+
+
+# ---------------------------------------------------------------------------
+# 5. Date/season parsing tests
+# ---------------------------------------------------------------------------
+
+def test_parse_target_season():
+    from rosetta.fetch import parse_target
+    from datetime import datetime
+    start, end = parse_target("MAM", year=2025)
+    assert start == datetime(2025, 3, 1)
+    assert end == datetime(2025, 5, 31)
+
+
+def test_parse_target_ond():
+    from rosetta.fetch import parse_target
+    from datetime import datetime
+    start, end = parse_target("OND", year=2025)
+    assert start == datetime(2025, 10, 1)
+    assert end == datetime(2025, 12, 31)
+
+
+def test_parse_target_passthrough():
+    from rosetta.fetch import parse_target
+    from datetime import datetime
+    pair = (datetime(2025, 3, 1), datetime(2025, 5, 31))
+    assert parse_target(pair) == pair
+
+
+def test_parse_init():
+    from rosetta.fetch import parse_init
+    from datetime import datetime
+    assert parse_init("2025-02") == datetime(2025, 2, 1)
+    dt = datetime(2025, 2, 1)
+    assert parse_init(dt) == dt
+
+
+# ---------------------------------------------------------------------------
+# 6. Adapter health checks
+# ---------------------------------------------------------------------------
+
+def test_check_product_config_health():
+    import rosetta
+    status = rosetta.check_product("nmme/cfsv2")
+    assert status["product"] == "nmme/cfsv2"
+    assert status["adapter"] == "opendap"
+    assert status["healthy"] is True
+    assert status["kind"] == "config"
+    assert "checked_at" in status
+
+
+def test_check_all_products_returns_all():
+    import rosetta
+    statuses = rosetta.check_all_products()
+    products = set(rosetta.catalog.list_products())
+    assert len(statuses) == len(products)
+    assert {s["product"] for s in statuses} == products
+    assert all("healthy" in s for s in statuses)
+
+
+# ---------------------------------------------------------------------------
+# 7. Time coordinate normalization
+# ---------------------------------------------------------------------------
+
+def test_decode_months_since(synthetic_nmme_ds):
+    """Numeric 'months since 1960-01-01' coords are decoded to datetime64."""
+    from rosetta.normalize import _decode_numeric_times
+    result = _decode_numeric_times(synthetic_nmme_ds)
+    assert np.issubdtype(result["S"].dtype, np.datetime64)
+    dates = pd.DatetimeIndex(result["S"].values)
+    assert list(dates.year) == [2010, 2011, 2012]
+    assert list(dates.month) == [2, 2, 2]
+
+
+def test_decode_days_since():
+    """Numeric 'days since' coords are decoded to datetime64."""
+    from rosetta.normalize import _decode_numeric_times
+    ds = xr.Dataset(
+        {"x": (["time"], [1.0, 2.0])},
+        coords={"time": [0.0, 365.0]},
+    )
+    ds["time"].attrs["units"] = "days since 2000-01-01"
+    result = _decode_numeric_times(ds)
+    assert np.issubdtype(result["time"].dtype, np.datetime64)
+    dates = pd.DatetimeIndex(result["time"].values)
+    assert dates[0] == pd.Timestamp("2000-01-01")
+    assert dates[1] == pd.Timestamp("2000-12-31")
+
+
+def test_decode_skips_non_numeric_coords():
+    """Coords that are already datetime64 are left unchanged."""
+    from rosetta.normalize import _decode_numeric_times
+    times = pd.to_datetime(["2020-01-01", "2020-02-01"])
+    ds = xr.Dataset(
+        {"x": (["time"], [1.0, 2.0])},
+        coords={"time": times},
+    )
+    result = _decode_numeric_times(ds)
+    assert np.issubdtype(result["time"].dtype, np.datetime64)
+    pd.testing.assert_index_equal(
+        pd.DatetimeIndex(result["time"].values), times
+    )
+
+
+def test_decode_skips_coords_without_since():
+    """Coords with plain units (no 'since') are left as-is."""
+    from rosetta.normalize import _decode_numeric_times
+    ds = xr.Dataset(
+        {"x": (["L"], [0.5, 1.5])},
+        coords={"L": [0.5, 1.5]},
+    )
+    ds["L"].attrs["units"] = "months"
+    result = _decode_numeric_times(ds)
+    np.testing.assert_array_equal(result["L"].values, [0.5, 1.5])
+
+
+def test_normalize_nmme_renames_dims(synthetic_nmme_ds):
+    """NMME dims S/L/M/Y/X are renamed to init_time/lead_time/member/lat/lon."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prec", "units": "mm/day",
+                       "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_nmme_ds, config, "precip")
+    assert "init_time" in result.dims
+    assert "lead_time" in result.dims
+    assert "member" in result.dims
+    assert "lat" in result.dims
+    assert "lon" in result.dims
+    for old in ("S", "L", "M", "Y", "X"):
+        assert old not in result.dims
+
+
+def test_normalize_nmme_decodes_init_time(synthetic_nmme_ds):
+    """NMME init_time coordinate is decoded to datetime64 during normalize."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prec", "units": "mm/day",
+                       "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_nmme_ds, config, "precip")
+    assert np.issubdtype(result["init_time"].dtype, np.datetime64)
+    dates = pd.DatetimeIndex(result["init_time"].values)
+    assert list(dates.month) == [2, 2, 2]
+
+
+def test_normalize_cds_forecast_renames_dims(synthetic_cds_forecast_ds):
+    """CDS forecast dims are renamed to init_time/lead_time/member/lat/lon."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "temp": {"native_name": "t2m", "units": "K", "target_units": "C"}
+        }
+    }
+    result = normalize(synthetic_cds_forecast_ds, config, "temp")
+    assert "init_time" in result.dims
+    assert "lead_time" in result.dims
+    assert "member" in result.dims
+    assert "lat" in result.dims
+    assert "lon" in result.dims
+    for old in ("forecast_reference_time", "forecastMonth", "number"):
+        assert old not in result.dims
+
+
+def test_normalize_cds_forecast_preserves_datetime(synthetic_cds_forecast_ds):
+    """CDS init_time stays as datetime64 (already decoded by xarray)."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "temp": {"native_name": "t2m", "units": "K", "target_units": "C"}
+        }
+    }
+    result = normalize(synthetic_cds_forecast_ds, config, "temp")
+    assert np.issubdtype(result["init_time"].dtype, np.datetime64)
+
+
+def test_normalize_obs_time_unchanged(synthetic_obs_monthly_ds):
+    """Obs datasets keep their time dim as 'time' with datetime64 values."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day",
+                       "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_obs_monthly_ds, config, "precip")
+    assert "time" in result.dims
+    assert np.issubdtype(result["time"].dtype, np.datetime64)
+    assert result["time"].attrs["axis"] == "T"
+
+
+def test_normalize_init_time_cf_axis(synthetic_nmme_ds):
+    """init_time gets CF axis='T' attribute."""
+    from rosetta.normalize import normalize
+    config = {
+        "variables": {
+            "precip": {"native_name": "prec", "units": "mm/day",
+                       "target_units": "mm/day"}
+        }
+    }
+    result = normalize(synthetic_nmme_ds, config, "precip")
+    assert result["init_time"].attrs["axis"] == "T"
+
+
+# ---------------------------------------------------------------------------
+# 8. OPeNDAP S-coordinate filtering (regression for year-mismatch fix)
+# ---------------------------------------------------------------------------
+
+def _make_nmme_remote_ds():
+    """Synthetic NMME-like dataset as returned by xr.open_dataset (undecoded).
+
+    S values (months since 1960-01-01):
+      601 = Feb 2010, 602 = Mar 2010,
+      613 = Feb 2011, 614 = Mar 2011,
+      625 = Feb 2012, 626 = Mar 2012
+    """
+    s_vals = np.array([601.0, 602.0, 613.0, 614.0, 625.0, 626.0])
+    lat = np.arange(-2, 3, 1.0)
+    lon = np.arange(36, 41, 1.0)
+    data = np.random.rand(len(s_vals), len(lat), len(lon)).astype(np.float32)
+    ds = xr.Dataset(
+        {"prec": (["S", "Y", "X"], data)},
+        coords={"S": s_vals, "Y": lat, "X": lon},
+    )
+    ds["S"].attrs["units"] = "months since 1960-01-01"
+    return ds
+
+
+def _nmme_product_config(**overrides):
+    config = {
+        "adapter": "opendap",
+        "source_url": "http://fake",
+        "variables": {
+            "precip": {"native_name": "prec", "units": "mm/day",
+                       "target_units": "mm/day"}
+        },
+        "_verbose": False,
+    }
+    config.update(overrides)
+    return config
+
+
+def test_opendap_filters_s_by_date_range(monkeypatch):
+    """S coordinate is filtered to only years within date_range."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    fake_ds = _make_nmme_remote_ds()
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: fake_ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    result = adapter.fetch_data(
+        _nmme_product_config(), "precip", date_range=(2010, 2011),
+    )
+    # 601=Feb2010, 602=Mar2010, 613=Feb2011, 614=Mar2011 -> 4 values kept
+    assert len(result.S) == 4
+    assert float(result.S.min()) == 601.0
+    assert float(result.S.max()) == 614.0
+
+
+def test_opendap_filters_s_by_init_months(monkeypatch):
+    """S coordinate is filtered to only matching init months."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    fake_ds = _make_nmme_remote_ds()
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: fake_ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    config = _nmme_product_config(init_months=[2])
+    result = adapter.fetch_data(config, "precip")
+    # Only Feb entries: 601, 613, 625
+    assert len(result.S) == 3
+    kept = result.S.values.tolist()
+    assert kept == [601.0, 613.0, 625.0]
+
+
+def test_opendap_filters_s_by_date_range_and_init_months(monkeypatch):
+    """Both date_range and init_months are applied together."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    fake_ds = _make_nmme_remote_ds()
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: fake_ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    config = _nmme_product_config(init_months=[3])
+    result = adapter.fetch_data(config, "precip", date_range=(2011, 2012))
+    # Mar 2011 (614) and Mar 2012 (626)
+    assert len(result.S) == 2
+    kept = result.S.values.tolist()
+    assert kept == [614.0, 626.0]
+
+
+def test_opendap_no_filter_keeps_all_s(monkeypatch):
+    """Without date_range or init_months, all S values are retained."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    fake_ds = _make_nmme_remote_ds()
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: fake_ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    result = adapter.fetch_data(_nmme_product_config(), "precip")
+    assert len(result.S) == 6
+
+
+def test_opendap_filters_lead_months(monkeypatch):
+    """target_lead_months selects and averages the correct L values."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    l_vals = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    lat = np.arange(-2, 3, 1.0)
+    lon = np.arange(36, 41, 1.0)
+    data = np.random.rand(len(l_vals), len(lat), len(lon)).astype(np.float32)
+    ds = xr.Dataset(
+        {"prec": (["L", "Y", "X"], data)},
+        coords={"L": l_vals, "Y": lat, "X": lon},
+    )
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    # target_lead_months=[1,2,3] → L=[0.5, 1.5, 2.5]
+    config = _nmme_product_config(target_lead_months=[1, 2, 3])
+    result = adapter.fetch_data(config, "precip")
+    assert "L" not in result.dims  # averaged out
+    expected = ds["prec"].sel(L=[0.5, 1.5, 2.5]).mean("L")
+    np.testing.assert_allclose(result["prec"].values, expected.values)
+
+
+def test_s3_filters_lead_months(monkeypatch, tmp_path):
+    """S3 adapter filters and averages L dimension using target_lead_months."""
+    from rosetta.adapters.s3 import S3Adapter
+
+    # Build a synthetic S3-style file (single init, with S/L/M/Y/X)
+    s_val = 601.0  # Feb 2010
+    l_vals = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    m_vals = np.arange(4)
+    lat = np.arange(-2, 3, 1.0)
+    lon = np.arange(36, 41, 1.0)
+    shape = (len(l_vals), len(m_vals), len(lat), len(lon))
+    data = np.random.rand(*shape).astype(np.float32)
+    ds = xr.Dataset(
+        {"precip": (["L", "M", "Y", "X"], data)},
+        coords={"S": s_val, "L": l_vals, "M": m_vals, "Y": lat, "X": lon},
+    )
+    ds["S"].attrs["units"] = "months since 1960-01-01"
+    nc_path = str(tmp_path / "test.nc")
+    ds.to_netcdf(nc_path)
+
+    # Mock S3 to serve our local file
+    monkeypatch.setattr(
+        "rosetta.adapters.s3._s3_exists", lambda p: True,
+    )
+    monkeypatch.setattr(
+        "rosetta.adapters.s3._s3_download",
+        lambda s3_path, local: __import__("shutil").copy(nc_path, local),
+    )
+
+    config = {
+        "adapter": "s3",
+        "s3_bucket": "fake",
+        "s3_prefix": "fake",
+        "file_template": "test_{year}-{month}.nc",
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day",
+                       "target_units": "mm/day"}
+        },
+        "init_months": [2],
+        "target_lead_months": [1, 2, 3],
+        "_verbose": False,
+        "_progress": False,
+    }
+
+    adapter = S3Adapter()
+    result = adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+
+    # L should be averaged out
+    assert "L" not in result.dims
+    assert "init_time" in result.dims
+    # Check the mean was computed over the correct leads
+    expected = ds["precip"].sel(L=[0.5, 1.5, 2.5]).mean("L")
+    np.testing.assert_allclose(
+        result["precip"].squeeze("init_time").values, expected.values,
+    )
+
+
+def test_s3_no_lead_filter_keeps_all(monkeypatch, tmp_path):
+    """Without target_lead_months, S3 adapter returns all leads."""
+    from rosetta.adapters.s3 import S3Adapter
+
+    s_val = 601.0
+    l_vals = np.array([0.5, 1.5, 2.5, 3.5, 4.5, 5.5])
+    m_vals = np.arange(4)
+    lat = np.arange(-2, 3, 1.0)
+    lon = np.arange(36, 41, 1.0)
+    shape = (len(l_vals), len(m_vals), len(lat), len(lon))
+    data = np.random.rand(*shape).astype(np.float32)
+    ds = xr.Dataset(
+        {"precip": (["L", "M", "Y", "X"], data)},
+        coords={"S": s_val, "L": l_vals, "M": m_vals, "Y": lat, "X": lon},
+    )
+    ds["S"].attrs["units"] = "months since 1960-01-01"
+    nc_path = str(tmp_path / "test.nc")
+    ds.to_netcdf(nc_path)
+
+    monkeypatch.setattr("rosetta.adapters.s3._s3_exists", lambda p: True)
+    monkeypatch.setattr(
+        "rosetta.adapters.s3._s3_download",
+        lambda s3_path, local: __import__("shutil").copy(nc_path, local),
+    )
+
+    config = {
+        "adapter": "s3",
+        "s3_bucket": "fake",
+        "s3_prefix": "fake",
+        "file_template": "test_{year}-{month}.nc",
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day",
+                       "target_units": "mm/day"}
+        },
+        "init_months": [2],
+        "_verbose": False,
+        "_progress": False,
+    }
+
+    adapter = S3Adapter()
+    result = adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    assert "L" in result.dims
+    assert len(result.L) == 6
+
+
+def test_opendap_year_filter_without_s_coord(monkeypatch):
+    """Datasets with a 'year' coord (no S) still use the original year filter path."""
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    years = np.array([2008, 2009, 2010, 2011, 2012])
+    lat = np.arange(-2, 3, 1.0)
+    lon = np.arange(36, 41, 1.0)
+    data = np.random.rand(len(years), len(lat), len(lon)).astype(np.float32)
+    ds = xr.Dataset(
+        {"prec": (["year", "Y", "X"], data)},
+        coords={"year": years, "Y": lat, "X": lon},
+    )
+    monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: ds.copy(deep=True))
+
+    adapter = OPeNDAPAdapter()
+    result = adapter.fetch_data(
+        _nmme_product_config(), "precip", date_range=(2009, 2011),
+    )
+    assert list(result.year.values) == [2009, 2010, 2011]

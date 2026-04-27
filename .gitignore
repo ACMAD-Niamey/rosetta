@@ -1,0 +1,38 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.so
+
+# Local virtual environments
+.venv/
+venv/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Notebook and editor noise
+.ipynb_checkpoints/
+.DS_Store
+
+# Local data/artifacts
+data/
+cache/
+tmp/
+*.nc
+*.zarr/
+*.grib
+*.grb
+*.tif
+*.tiff
+
+# Local secrets/config (do not commit credentials)
+.env
+.env.*
+*.pem
+*.key
+*credentials*.json

@@ -1,0 +1,720 @@
+nmme/cfsv2:
+  adapter: opendap
+  # NOTE: This uses PENTAD_SAMPLES/.MONTHLY which returns 28 members and all
+  # 10 lead months per init.  When rosetta.fetch() is called with init= and
+  # target=, the OPeNDAP adapter automatically selects and averages only the
+  # 3 leads corresponding to the target season (L = lead_month - 0.5).
+  #
+  # KNOWN ISSUE: pycpt/IRI uses PENTAD_SAMPLES_FULL (a different sub-collection)
+  # with server-side member averaging.  The two datasets can diverge spatially
+  # for predictor domains that include ocean/Atlantic cells (e.g. W Africa),
+  # causing r(DS_gcm, IRI_gcm) < 1 and reduced cross-pipeline CCA agreement.
+  # TODO: Switch source_url to PENTAD_SAMPLES_FULL once the OPeNDAP adapter
+  # supports the required server-side lead + member averaging for that endpoint.
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.HINDCAST/.PENTAD_SAMPLES/.MONTHLY"
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 28  # PENTAD_SAMPLES/.MONTHLY returns 28 members (not 24)
+    hindcast_range: [1982, 2010]
+
+nmme/cfsv2-forecast:
+  adapter: opendap
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.FORECAST/.PENTAD_SAMPLES/.MONTHLY"
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 28
+    hindcast_range: null  # forecast only, 2011-present
+
+# CCSM4 via IRI OPeNDAP (combined hindcast + forecast, 1982-present)
+nmme/ccsm4-iri:
+  adapter: opendap
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.COLA-RSMAS-CCSM4/.MONTHLY"
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1982, 2026]
+
+# GEOSS2S forecast via IRI OPeNDAP (2017-present, 10 members)
+nmme/geoss2s-forecast:
+  adapter: opendap
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NASA-GEOSS2S/.FORECAST/.MONTHLY"
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: null  # forecast only, 2017-present
+
+# NMME hindcasts archived on S3 (downloaded from IRI Data Library)
+# One file per init time, contains all members/leads for precip + temp
+
+nmme/ccsm4-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/ccsm4"
+  file_template: "ccsm4_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1982, 2020]
+
+nmme/gemnemo-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/gemnemo"
+  file_template: "gemnemo_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1982, 2020]
+
+nmme/cesm1-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/cesm1"
+  file_template: "cesm1_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1991, 2020]
+
+nmme/canesm5-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/canesm5"
+  file_template: "canesm5_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1991, 2020]
+
+nmme/gem52nemo-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/gem52nemo"
+  file_template: "gem52nemo_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1991, 2020]
+
+nmme/geoss2s-hindcast:
+  adapter: s3
+  s3_bucket: "acc.ord"
+  s3_prefix: "nmme-hindcasts/geoss2s"
+  file_template: "geoss2s_{year}-{month}.nc"
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: temp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1982, 2020]
+
+# NCEI NMME archive (2018+ only, no hindcasts)
+# https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/
+
+nmme/ccsm4:
+  adapter: ncei
+  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/ccsm4"
+  file_regex: "{var}_day_ccsm4_{init}_{member}_.*\\.nc"
+  member_list: ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1",
+                "r6i1p1", "r7i1p1", "r8i1p1", "r9i1p1", "r10i1p1"]
+  variables:
+    precip:
+      native_name: pr
+      units: "m/s"
+      target_units: "mm/day"
+    temp:
+      native_name: tasmax
+      short_name: TREFMXAV
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: null
+
+nmme/geoss2s:
+  adapter: ncei
+  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/geos-5"
+  file_regex: "{var}_daily_geos-5\\.{init}09_{member}_.*\\.nc"
+  member_list: ["E1", "E2", "E3", "E4"]
+  time_fix: "geos5_year"
+  variables:
+    precip:
+      native_name: pr
+      units: "kg m-2 s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: tasmax
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 4
+    hindcast_range: null
+
+nmme/gemnemo:
+  adapter: ncei
+  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/gemnemo"
+  file_regex: "{var}_daily_gemnemo\\.{init}_{member}_.*\\.nc"
+  member_list: ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10"]
+  variables:
+    precip:
+      native_name: pr
+      units: "kg m-2 s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: tasmax
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: null
+
+c3s/ecmwf:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "ecmwf"
+  system: "51"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 51
+    hindcast_range: [1981, 2016]
+
+c3s/eccc-cansips:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "eccc"
+  system: "3"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 10
+    hindcast_range: [1981, 2010]
+
+c3s/eccc-cansipsv3:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "eccc"
+  system: "4"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1993, 2020]
+
+c3s/meteofrance:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "meteo_france"
+  system: "9"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 31
+    hindcast_range: [1993, 2018]
+
+c3s/cmcc:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "cmcc"
+  system: "35"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 40
+    hindcast_range: [1993, 2016]
+
+c3s/dwd:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "dwd"
+  system: "22"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 50
+    hindcast_range: [1993, 2023]
+
+c3s/ukmo:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "ukmo"
+  system: "604"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 28
+    hindcast_range: [1993, 2016]
+
+c3s/jma:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "jma"
+  system: "3"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.25
+    lon_res: 1.25
+    members: 10
+    hindcast_range: [1993, 2020]
+
+# Older system versions (match IRI Data Library versions)
+
+c3s/jma-cps2:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "jma"
+  system: "2"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.25
+    lon_res: 1.25
+    members: 5
+    hindcast_range: [1993, 2016]
+
+c3s/dwd-gcfs21:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "dwd"
+  system: "21"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1993, 2016]
+
+# Daily (sub-monthly) CDS entries — seasonal-original-single-levels
+# These provide daily-resolution hindcasts and (where available) forecasts.
+# Precip is accumulated from init and must be deaccumulated (accumulated: true).
+# Only c3s/ecmwf existed before; these extend daily coverage to 5 more centres.
+
+c3s/meteofrance-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "meteo_france"
+  system: "9"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 31
+    hindcast_range: [1993, 2024]
+
+c3s/cmcc-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "cmcc"
+  system: "35"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 40
+    hindcast_range: [1993, 2016]
+
+c3s/dwd-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "dwd"
+  system: "22"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1993, 2023]
+
+c3s/eccc-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "eccc"
+  system: "4"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1993, 2023]
+
+c3s/ukmo-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "ukmo"
+  system: "604"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 7
+    hindcast_range: [1993, 2016]
+
+obs/chirps:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.cog"
+  format: cog
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/month"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    temporal: monthly
+
+obs/chirps-v2:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_monthly/cogs/"
+  file_pattern: "chirps-v2.0.{year}.{month:02d}.cog"
+  format: cog
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/month"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    temporal: monthly
+
+c3s/ecmwf-monthly:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "ecmwf"
+  system: "51"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+  members: 25
+  hindcast_range: [1993, 2016]
+
+c3s/ecmwf-seas51c:
+  adapter: iridl
+  iridl_path: "SOURCES/.EU/.Copernicus/.CDS/.C3S/.ECMWF/.SEAS51_iri2/.appended"
+  variables:
+    precip:
+      iridl_name: prcp
+      native_name: prcp
+      units: "mm/day"
+      target_units: "mm/day"
+      iridl_unit_ops: "c%3A/1000/(mm%20m-1)/%3Ac/mul/c%3A/86400/(s%20day-1)/%3Ac/mul"
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+  members: 25
+  hindcast_range: [1993, 2016]
+
+obs/era5:
+  adapter: cds
+  cds_dataset: "reanalysis-era5-single-levels-monthly-means"
+  product_type: "monthly_averaged_reanalysis"
+  variables:
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25

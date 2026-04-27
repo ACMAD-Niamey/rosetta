@@ -1,0 +1,383 @@
+"""Tests for rosetta.validate — structural checks, comparison, and report I/O.
+
+Synthetic tests (no network):  pytest tests/test_validate.py
+Integration tests (network):   pytest tests/test_validate.py -m integration
+"""
+
+import json
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+
+from rosetta.validate import (
+    ValidationResult,
+    check_structure,
+    compare,
+    compute_correlations,
+    read_report,
+    regrid_to_common,
+    validate_product,
+    write_report,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def good_gcm_ds():
+    """A well-formed GCM hindcast dataset after normalization."""
+    init_times = pd.to_datetime([f"{y}-02-01" for y in range(2000, 2010)])
+    members = np.arange(5)
+    lat = np.arange(-10, 11, 1.0)
+    lon = np.arange(30, 51, 1.0)
+    shape = (len(init_times), len(members), len(lat), len(lon))
+    data = np.random.rand(*shape).astype(np.float32) * 10
+    ds = xr.Dataset(
+        {"precip": (["init_time", "member", "lat", "lon"], data)},
+        coords={
+            "init_time": init_times,
+            "member": members,
+            "lat": lat,
+            "lon": lon,
+        },
+    )
+    ds["precip"].attrs["units"] = "mm/day"
+    return ds
+
+
+@pytest.fixture
+def all_nan_ds():
+    """Dataset where the variable is entirely NaN."""
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    data = np.full((len(lat), len(lon)), np.nan, dtype=np.float32)
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"], data)},
+        coords={"lat": lat, "lon": lon},
+    )
+    ds["precip"].attrs["units"] = "mm/day"
+    return ds
+
+
+@pytest.fixture
+def missing_var_ds():
+    """Dataset missing the expected variable."""
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    data = np.ones((len(lat), len(lon)), dtype=np.float32)
+    return xr.Dataset(
+        {"wrong_name": (["lat", "lon"], data)},
+        coords={"lat": lat, "lon": lon},
+    )
+
+
+@pytest.fixture
+def no_units_ds():
+    """Dataset where the variable has no units attribute."""
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    data = np.ones((len(lat), len(lon)), dtype=np.float32) * 5.0
+    return xr.Dataset(
+        {"precip": (["lat", "lon"], data)},
+        coords={"lat": lat, "lon": lon},
+    )
+
+
+@pytest.fixture
+def implausible_ds():
+    """Dataset with physically implausible precip values (negative)."""
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    data = np.full((len(lat), len(lon)), -999.0, dtype=np.float32)
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"], data)},
+        coords={"lat": lat, "lon": lon},
+    )
+    ds["precip"].attrs["units"] = "mm/day"
+    return ds
+
+
+@pytest.fixture
+def correlated_pair():
+    """Two DataArrays that are perfectly correlated (r=1.0)."""
+    init_times = pd.to_datetime([f"{y}-02-01" for y in range(2000, 2015)])
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    shape = (len(init_times), len(lat), len(lon))
+    data = np.random.rand(*shape).astype(np.float32) * 10
+    coords = {"init_time": init_times, "lat": lat, "lon": lon}
+    da1 = xr.DataArray(data, dims=["init_time", "lat", "lon"], coords=coords)
+    da2 = da1.copy(deep=True)
+    return da1, da2
+
+
+@pytest.fixture
+def uncorrelated_pair():
+    """Two DataArrays with independent random data."""
+    np.random.seed(42)
+    init_times = pd.to_datetime([f"{y}-02-01" for y in range(2000, 2015)])
+    lat = np.arange(-5, 6, 1.0)
+    lon = np.arange(30, 41, 1.0)
+    shape = (len(init_times), len(lat), len(lon))
+    coords = {"init_time": init_times, "lat": lat, "lon": lon}
+    da1 = xr.DataArray(
+        np.random.rand(*shape).astype(np.float32),
+        dims=["init_time", "lat", "lon"], coords=coords,
+    )
+    da2 = xr.DataArray(
+        np.random.rand(*shape).astype(np.float32),
+        dims=["init_time", "lat", "lon"], coords=coords,
+    )
+    return da1, da2
+
+
+# ---------------------------------------------------------------------------
+# check_structure tests
+# ---------------------------------------------------------------------------
+
+class TestCheckStructure:
+    def test_good_dataset_passes_all(self, good_gcm_ds):
+        checks = check_structure(good_gcm_ds, "test/product", "precip")
+        assert checks["variable_present"]["passed"]
+        assert checks["has_units"]["passed"]
+        assert checks["spatial_dims"]["passed"]
+        assert checks["not_all_nan"]["passed"]
+        assert checks["value_range"]["passed"]
+
+    def test_missing_variable_fails(self, missing_var_ds):
+        checks = check_structure(missing_var_ds, "test/product", "precip")
+        assert not checks["variable_present"]["passed"]
+        assert len(checks) == 1
+
+    def test_all_nan_fails(self, all_nan_ds):
+        checks = check_structure(all_nan_ds, "test/product", "precip")
+        assert not checks["not_all_nan"]["passed"]
+
+    def test_no_units_fails(self, no_units_ds):
+        checks = check_structure(no_units_ds, "test/product", "precip")
+        assert not checks["has_units"]["passed"]
+
+    def test_implausible_values_fail(self, implausible_ds):
+        checks = check_structure(implausible_ds, "test/product", "precip")
+        assert not checks["value_range"]["passed"]
+
+    def test_member_count_check(self, good_gcm_ds):
+        config = {"grid": {"members": 5}}
+        checks = check_structure(good_gcm_ds, "test/product", "precip", config)
+        assert checks["member_count"]["passed"]
+
+    def test_member_count_mismatch(self, good_gcm_ds):
+        config = {"grid": {"members": 10}}
+        checks = check_structure(good_gcm_ds, "test/product", "precip", config)
+        assert not checks["member_count"]["passed"]
+
+
+# ---------------------------------------------------------------------------
+# Correlation tests
+# ---------------------------------------------------------------------------
+
+class TestCorrelations:
+    def test_perfect_correlation(self, correlated_pair):
+        da1, da2 = correlated_pair
+        r_ts, r_spat = compute_correlations(da1, da2)
+        assert r_ts == pytest.approx(1.0, abs=1e-6)
+        assert r_spat == pytest.approx(1.0, abs=1e-6)
+
+    def test_uncorrelated_low_r(self, uncorrelated_pair):
+        da1, da2 = uncorrelated_pair
+        r_ts, r_spat = compute_correlations(da1, da2)
+        assert abs(r_ts) < 0.5
+        assert abs(r_spat) < 0.5
+
+    def test_insufficient_time_returns_nan(self):
+        lat = np.arange(-2, 3, 1.0)
+        lon = np.arange(30, 35, 1.0)
+        init_times = pd.to_datetime(["2010-02-01", "2011-02-01"])
+        shape = (2, len(lat), len(lon))
+        coords = {"init_time": init_times, "lat": lat, "lon": lon}
+        da1 = xr.DataArray(np.ones(shape), dims=["init_time", "lat", "lon"], coords=coords)
+        da2 = da1.copy(deep=True)
+        r_ts, r_spat = compute_correlations(da1, da2)
+        assert np.isnan(r_ts)
+
+
+class TestCompare:
+    def test_identical_passes(self, correlated_pair):
+        da1, da2 = correlated_pair
+        r_ts, r_spat, status = compare(da1, da2, threshold=0.95)
+        assert status == "PASS"
+        assert r_ts >= 0.95
+
+    def test_uncorrelated_does_not_pass(self, uncorrelated_pair):
+        da1, da2 = uncorrelated_pair
+        r_ts, r_spat, status = compare(da1, da2, threshold=0.95)
+        assert status in ("CHECK", "ERROR")
+
+
+class TestRegrid:
+    def test_same_grid_noop(self, correlated_pair):
+        da1, da2 = correlated_pair
+        r1, r2 = regrid_to_common(da1, da2)
+        assert r1.sizes == da1.sizes
+        assert r2.sizes == da2.sizes
+
+    def test_different_grids_regridded(self):
+        lat1 = np.arange(-10, 11, 1.0)
+        lon1 = np.arange(30, 51, 1.0)
+        lat2 = np.arange(-10, 11, 2.0)
+        lon2 = np.arange(30, 51, 2.0)
+        init_times = pd.to_datetime([f"{y}-02-01" for y in range(2000, 2005)])
+        da1 = xr.DataArray(
+            np.random.rand(len(init_times), len(lat1), len(lon1)),
+            dims=["init_time", "lat", "lon"],
+            coords={"init_time": init_times, "lat": lat1, "lon": lon1},
+        )
+        da2 = xr.DataArray(
+            np.random.rand(len(init_times), len(lat2), len(lon2)),
+            dims=["init_time", "lat", "lon"],
+            coords={"init_time": init_times, "lat": lat2, "lon": lon2},
+        )
+        r1, r2 = regrid_to_common(da1, da2)
+        assert r1.sizes["lat"] == r2.sizes["lat"]
+        assert r1.sizes["lon"] == r2.sizes["lon"]
+
+
+# ---------------------------------------------------------------------------
+# ValidationResult tests
+# ---------------------------------------------------------------------------
+
+class TestValidationResult:
+    def test_passed_statuses(self):
+        assert ValidationResult(product="x", variable="p", reference="iri", status="PASS").passed()
+        assert ValidationResult(product="x", variable="p", reference="none", status="ROS_ONLY").passed()
+        assert not ValidationResult(product="x", variable="p", reference="iri", status="CHECK").passed()
+        assert not ValidationResult(product="x", variable="p", reference="iri", status="ERROR").passed()
+
+    def test_report_entry_format(self):
+        r = ValidationResult(
+            product="c3s/ecmwf-monthly", variable="precip", reference="iri",
+            r_timeseries=0.9876, r_spatial=0.9912, status="PASS",
+            init_month=2, target="MAM", region=[-20, 20, 20, 55],
+            hindcast=(1993, 2016), threshold=0.95,
+            timestamp="2026-04-16T00:00:00+00:00",
+        )
+        entry = r.to_report_entry()
+        assert entry["rosetta_key"] == "c3s/ecmwf-monthly"
+        assert entry["r_timeseries"] == 0.9876
+        assert entry["status"] == "PASS"
+
+    def test_nan_r_becomes_none_in_report(self):
+        r = ValidationResult(product="x", variable="p", reference="none", status="ROS_ONLY")
+        entry = r.to_report_entry()
+        assert entry["r_timeseries"] is None
+        assert entry["r_spatial"] is None
+
+
+# ---------------------------------------------------------------------------
+# Report I/O tests
+# ---------------------------------------------------------------------------
+
+class TestReportIO:
+    def test_write_and_read_roundtrip(self):
+        results = [
+            ValidationResult(
+                product="c3s/ecmwf-monthly", variable="precip", reference="iri",
+                r_timeseries=1.0, r_spatial=1.0, status="PASS",
+                timestamp="2026-04-16T00:00:00+00:00",
+            ),
+            ValidationResult(
+                product="c3s/ukmo", variable="precip", reference="none",
+                status="ROS_ONLY",
+                timestamp="2026-04-16T00:00:00+00:00",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "report.json")
+            written = write_report(results, path)
+            assert Path(written).exists()
+
+            data = read_report(path)
+            assert len(data) == 2
+            assert data[0]["rosetta_key"] == "c3s/ecmwf-monthly"
+            assert data[0]["r_timeseries"] == 1.0
+            assert data[0]["status"] == "PASS"
+            assert data[1]["status"] == "ROS_ONLY"
+
+    def test_hook_compatible_format(self):
+        """The JSON matches what require-parity-verified.sh parses."""
+        results = [
+            ValidationResult(
+                product="nmme/cfsv2", variable="precip", reference="iri",
+                r_timeseries=0.9999, r_spatial=0.9999, status="PASS",
+                timestamp="2026-04-16T00:00:00+00:00",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = str(Path(tmpdir) / "report.json")
+            write_report(results, path)
+            with open(path) as f:
+                data = json.load(f)
+
+            assert isinstance(data, list)
+            entry = data[0]
+            assert "rosetta_key" in entry
+            assert "r_timeseries" in entry
+            assert "status" in entry
+            assert isinstance(entry["r_timeseries"], float)
+            assert entry["r_timeseries"] >= 0.95
+
+
+# ---------------------------------------------------------------------------
+# validate_product (synthetic, no network)
+# ---------------------------------------------------------------------------
+
+class TestValidateProductSynthetic:
+    def test_self_validation_with_mock(self, monkeypatch, good_gcm_ds):
+        """validate_product with reference='self' runs structural checks only."""
+        def mock_fetch(*args, **kwargs):
+            return good_gcm_ds
+        monkeypatch.setattr("rosetta.validate._fetch_rosetta_da",
+                            lambda *a, **kw: good_gcm_ds["precip"].mean("member"))
+
+        result = validate_product(
+            "nmme/cfsv2", variable="precip", reference="self",
+            hindcast=(2000, 2009), verbose=False,
+        )
+        assert result.status == "PASS"
+        assert result.structural_checks["variable_present"]["passed"]
+        assert np.isnan(result.r_timeseries)
+
+    def test_comparison_with_reference_da(self, monkeypatch, correlated_pair):
+        """validate_product with reference_da runs comparison."""
+        da1, da2 = correlated_pair
+        monkeypatch.setattr("rosetta.validate._fetch_rosetta_da", lambda *a, **kw: da1)
+
+        result = validate_product(
+            "nmme/cfsv2", variable="precip", reference="iri",
+            reference_da=da2, hindcast=(2000, 2014), verbose=False,
+        )
+        assert result.status == "PASS"
+        assert result.r_timeseries == pytest.approx(1.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests (require network + credentials)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_validate_cfsv2_self():
+    """Structural validation of CFSv2 via live fetch."""
+    result = validate_product(
+        "nmme/cfsv2", variable="precip", reference="self",
+        init_month=2, target="MAM", region=[-2, 2, 36, 40],
+        hindcast=(2008, 2010), verbose=True,
+    )
+    assert result.status == "PASS"
+    assert result.structural_checks["variable_present"]["passed"]
+    assert result.structural_checks["value_range"]["passed"]
