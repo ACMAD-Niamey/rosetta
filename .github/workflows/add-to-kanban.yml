@@ -1,0 +1,14 @@
+name: Add issues to Kanban
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  add-to-kanban:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1.0.2
+        with:
+          project-url: https://github.com/orgs/accord-research/projects/2
+          github-token: ${{ secrets.KANBAN_TOKEN }}
