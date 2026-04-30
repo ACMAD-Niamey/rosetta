@@ -757,6 +757,25 @@ def test_pycpt_reference_coverage():
     assert not missing_variables, "Missing variable definitions:\n" + "\n".join(missing_variables)
 
 
+def test_all_non_pending_entries_pass_config_health_check():
+    """Every catalog entry that isn't pending_url should pass a config-level health check."""
+    import warnings
+    from rosetta import health, catalog
+
+    failures = []
+    for product in catalog.list_products():
+        cfg = catalog.info(product)
+        if cfg.get("pending_url"):
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = health.check_product(product, probe_remote=False)
+        if not result["healthy"]:
+            failures.append(f"{product}: {result['message']}")
+
+    assert not failures, "Config health check failures:\n" + "\n".join(failures)
+
+
 def test_placeholder_entries_exist_and_return_healthy_false():
     from rosetta import health, catalog
     placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
