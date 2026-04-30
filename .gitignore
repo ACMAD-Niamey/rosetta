@@ -36,3 +36,8 @@ tmp/
 *.pem
 *.key
 *credentials*.json
+
+.claude_env
+
+# Git worktrees
+.worktrees/
