@@ -53,7 +53,7 @@ def fetch(product, variable, init=None, target=None, region=None,
           progress=True):
     """Fetch, normalize, and optionally save climate data.
 
-    Caching is handled at the adapter level via @nuthatch.cache().
+    Caching is handled by _fetch_raw() via @nuthatch.cache().
     """
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 

@@ -35,7 +35,8 @@ def test_adapters_do_not_have_nuthatch_cache():
 
 def test_nuthatch_config_in_pyproject():
     import tomllib
-    with open("pyproject.toml", "rb") as f:
+    from pathlib import Path
+    with open(Path(__file__).parent.parent / "pyproject.toml", "rb") as f:
         config = tomllib.load(f)
     assert "nuthatch" in config.get("tool", {}), \
         "Missing [tool.nuthatch] section in pyproject.toml"
@@ -52,7 +53,8 @@ def test_cli_cache_list_invokable():
 
 def test_cli_is_registered_in_pyproject():
     import tomllib
-    with open("pyproject.toml", "rb") as f:
+    from pathlib import Path
+    with open(Path(__file__).parent.parent / "pyproject.toml", "rb") as f:
         config = tomllib.load(f)
     scripts = config.get("project", {}).get("scripts", {})
     assert "rosetta" in scripts, \
