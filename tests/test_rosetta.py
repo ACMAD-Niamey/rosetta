@@ -689,6 +689,44 @@ def test_health_check_non_deprecated_no_warning():
 # 10. Placeholder entries
 # ---------------------------------------------------------------------------
 
+def test_c3s_entries_have_sst():
+    from rosetta import catalog
+    c3s_products = [p for p in catalog.list_products()
+                    if p.startswith("c3s/") and not catalog.info(p).get("deprecated")
+                    and not catalog.info(p).get("pending_url")]
+    assert len(c3s_products) > 0, "No non-deprecated C3S products found"
+    for product in c3s_products:
+        cfg = catalog.info(product)
+        assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
+        sst = cfg["variables"]["sst"]
+        assert sst["native_name"] == "sea_surface_temperature"
+        assert sst["units"] == "K"
+        assert sst["target_units"] == "K"
+
+def test_ncei_entries_have_sst():
+    from rosetta import catalog
+    for product in ["nmme/ccsm4", "nmme/geoss2s", "nmme/gemnemo"]:
+        cfg = catalog.info(product)
+        assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
+        assert cfg["variables"]["sst"]["native_name"] == "sst"
+
+def test_normalize_sst_preserves_nan():
+    import numpy as np
+    import xarray as xr
+    from rosetta.normalize import normalize
+    data = np.array([[np.nan, 300.0], [301.0, np.nan]], dtype=np.float32)
+    ds = xr.Dataset(
+        {"sst": (["latitude", "longitude"], data)},
+        coords={"latitude": [0.0, 1.0], "longitude": [30.0, 31.0]},
+    )
+    config = {"variables": {"sst": {"native_name": "sst", "units": "K", "target_units": "K"}}}
+    result = normalize(ds, config, "sst")
+    assert "sst" in result
+    assert np.isnan(result["sst"].values[0, 0])
+    assert np.isnan(result["sst"].values[1, 1])
+    assert not np.isnan(result["sst"].values[0, 1])
+
+
 def test_placeholder_entries_exist_and_return_healthy_false():
     from rosetta import health, catalog
     placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",

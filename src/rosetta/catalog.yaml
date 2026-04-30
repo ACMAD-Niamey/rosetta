@@ -233,6 +233,10 @@ nmme/ccsm4:
       short_name: TREFMXAV
       units: K
       target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -254,6 +258,10 @@ nmme/geoss2s:
       native_name: tasmax
       units: K
       target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -274,6 +282,10 @@ nmme/gemnemo:
       native_name: tasmax
       units: K
       target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -297,6 +309,10 @@ c3s/ecmwf:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -321,6 +337,10 @@ c3s/eccc-cansips:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -345,6 +365,10 @@ c3s/eccc-cansipsv3:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -369,6 +393,10 @@ c3s/meteofrance:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -393,6 +421,10 @@ c3s/cmcc:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -417,6 +449,10 @@ c3s/dwd:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -441,6 +477,10 @@ c3s/ukmo:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -465,6 +505,10 @@ c3s/jma:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.25
     lon_res: 1.25
@@ -491,6 +535,10 @@ c3s/jma-cps2:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.25
     lon_res: 1.25
@@ -515,6 +563,10 @@ c3s/dwd-gcfs21:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -543,6 +595,10 @@ c3s/meteofrance-daily:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -566,6 +622,10 @@ c3s/cmcc-daily:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -589,6 +649,10 @@ c3s/dwd-daily:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -612,6 +676,10 @@ c3s/eccc-daily:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -635,6 +703,10 @@ c3s/ukmo-daily:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -691,6 +763,10 @@ c3s/ecmwf-monthly:
       short_name: t2m
       units: K
       target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
