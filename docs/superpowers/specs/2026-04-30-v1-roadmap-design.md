@@ -51,7 +51,7 @@ Successor mappings:
 When `check_product()` is called on a deprecated entry, emit `warnings.warn(...)` with the successor name before probing. Do not block or error — existing fetches continue to work while IRI URLs still respond.
 
 ### CCSR stub (§6.2)
-New file `src/rosetta/adapters/ccsr.py`: a class conforming to `AdapterBase` that raises `NotImplementedError("CCSR API not yet public — track https://github.com/accord-research/rosetta/issues/14")` from `fetch()` and `probe()`.
+Skipped — CCSR successor API is not yet publicly documented. No code action. Issue #14 remains open.
 
 ### Migration table (§6.3)
 New section "Data source migration" added to `README.md` with a table mapping old IRI-backed products to successors and status (migrated / tracking / pending).
@@ -191,4 +191,5 @@ Agents B and C have no file overlap. Agent A touches `health.py` (deprecation wa
 ## Out of scope today
 - #7 §3.2 Sheerwater-backed catalog entries (depends-on-deepscale)
 - #12 §5 Shapefile region input (depends-on-deepscale)
+- #14 §6.2 CCSR stub adapter (CCSR API not yet publicly documented — wait)
 - SPEAR live URL (pending GFDL/NODD public path)
