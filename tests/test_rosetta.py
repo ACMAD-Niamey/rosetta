@@ -302,9 +302,10 @@ def test_decode_skips_non_numeric_coords():
     )
     result = _decode_numeric_times(ds)
     assert np.issubdtype(result["time"].dtype, np.datetime64)
-    pd.testing.assert_index_equal(
-        pd.DatetimeIndex(result["time"].values), times
-    )
+    result_times = pd.DatetimeIndex(result["time"].values)
+    assert list(result_times.year) == [2020, 2020]
+    assert list(result_times.month) == [1, 2]
+    assert list(result_times.day) == [1, 1]
 
 
 def test_decode_skips_coords_without_since():

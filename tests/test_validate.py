@@ -343,7 +343,7 @@ class TestValidateProductSynthetic:
         def mock_fetch(*args, **kwargs):
             return good_gcm_ds
         monkeypatch.setattr("rosetta.validate._fetch_rosetta_da",
-                            lambda *a, **kw: good_gcm_ds["precip"].mean("member"))
+                            lambda *a, **kw: good_gcm_ds["precip"].mean("member", keep_attrs=True))
 
         result = validate_product(
             "nmme/cfsv2", variable="precip", reference="self",
@@ -371,6 +371,7 @@ class TestValidateProductSynthetic:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_validate_cfsv2_self():
     """Structural validation of CFSv2 via live fetch."""
     result = validate_product(
