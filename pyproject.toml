@@ -21,6 +21,9 @@ s3 = ["boto3"]
 dev = ["pytest"]
 demo = ["matplotlib", "cartopy", "rasterio"]
 
+[project.scripts]
+rosetta = "rosetta.cli:cli"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -34,3 +37,11 @@ markers = [
     "integration: requires network access",
     "cds: requires CDS credentials in ~/.cdsapirc",
 ]
+
+[tool.nuthatch]
+# V1: root and local both point to the same local filesystem path.
+# Public mirror is a V2 item.
+[tool.nuthatch.root]
+filesystem = "~/.nuthatch/rosetta"
+[tool.nuthatch.local]
+filesystem = "~/.nuthatch/rosetta"
