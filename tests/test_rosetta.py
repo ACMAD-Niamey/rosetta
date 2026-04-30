@@ -727,6 +727,29 @@ def test_normalize_sst_preserves_nan():
     assert not np.isnan(result["sst"].values[0, 1])
 
 
+def test_pycpt_reference_coverage():
+    """Every PyCPT reference GCM maps to a resolvable Rosetta catalog entry with the correct variable."""
+    from rosetta import catalog
+    from tests.conftest import PYCPT_REFERENCE_GCMS
+
+    missing_products = []
+    missing_variables = []
+
+    for pycpt_name, (product, variable) in PYCPT_REFERENCE_GCMS.items():
+        try:
+            cfg = catalog.info(product)
+        except KeyError:
+            missing_products.append(f"{pycpt_name} -> {product} (not in catalog)")
+            continue
+        if variable not in cfg["variables"]:
+            missing_variables.append(
+                f"{pycpt_name} -> {product}.{variable} (variable not defined)"
+            )
+
+    assert not missing_products, "Missing catalog entries:\n" + "\n".join(missing_products)
+    assert not missing_variables, "Missing variable definitions:\n" + "\n".join(missing_variables)
+
+
 def test_placeholder_entries_exist_and_return_healthy_false():
     from rosetta import health, catalog
     placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",

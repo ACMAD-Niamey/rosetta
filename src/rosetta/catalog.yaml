@@ -23,6 +23,10 @@ nmme/cfsv2:
       native_name: tref
       units: K
       target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
@@ -785,6 +789,10 @@ c3s/ecmwf-seas51c:
       units: "mm/day"
       target_units: "mm/day"
       iridl_unit_ops: "c%3A/1000/(mm%20m-1)/%3Ac/mul/c%3A/86400/(s%20day-1)/%3Ac/mul"
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
