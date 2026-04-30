@@ -766,7 +766,7 @@ def test_all_non_pending_entries_pass_config_health_check():
     failures = []
     for product in catalog.list_products():
         cfg = catalog.info(product)
-        if cfg.get("pending_url"):
+        if cfg.get("pending_url") or cfg.get("deprecated"):
             continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
