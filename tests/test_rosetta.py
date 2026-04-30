@@ -683,3 +683,20 @@ def test_health_check_non_deprecated_no_warning():
         health.check_product("c3s/ecmwf")
     deprecation_warnings = [x for x in w if "deprecated" in str(x.message).lower()]
     assert len(deprecation_warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# 10. Placeholder entries
+# ---------------------------------------------------------------------------
+
+def test_placeholder_entries_exist_and_return_healthy_false():
+    from rosetta import health, catalog
+    placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
+                    "nmme/spearb-hindcast", "nmme/cansipsic4", "nmme/cansipsic4-hindcast"]
+    for product in placeholders:
+        cfg = catalog.info(product)
+        assert cfg.get("pending_url") is True, f"{product} should have pending_url: true"
+        result = health.check_product(product)
+        assert result["healthy"] is False, f"{product} should return healthy=False"
+        assert "pending" in result["message"].lower() or "url" in result["message"].lower(), \
+            f"{product} message should explain the pending URL: {result['message']}"

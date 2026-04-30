@@ -728,3 +728,136 @@ obs/era5:
   grid:
     lat_res: 0.25
     lon_res: 0.25
+
+# GFDL SPEAR (precipitation) — pending source URL
+# Source: GFDL THREDDS or NOAA NODD (path TBD)
+# See: https://github.com/accord-research/rosetta/issues/1
+nmme/spear:
+  adapter: opendap
+  pending_url: true
+  pending_url_note: "Pending: GFDL SPEAR OPeNDAP source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
+  source_url: null
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1991, 2020]
+
+nmme/spear-hindcast:
+  adapter: opendap
+  pending_url: true
+  pending_url_note: "Pending: GFDL SPEAR hindcast source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
+  source_url: null
+  variables:
+    precip:
+      native_name: prec
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: tref
+      units: K
+      target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1991, 2020]
+
+# GFDL SPEARb (sea surface temperature) — pending source URL
+# PyCPT uses SPEARb specifically for the SST predictor track
+nmme/spearb:
+  adapter: opendap
+  pending_url: true
+  pending_url_note: "Pending: GFDL SPEARb source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
+  source_url: null
+  variables:
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1991, 2020]
+
+nmme/spearb-hindcast:
+  adapter: opendap
+  pending_url: true
+  pending_url_note: "Pending: GFDL SPEARb hindcast source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
+  source_url: null
+  variables:
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 30
+    hindcast_range: [1991, 2020]
+
+# CanSIPS-IC4 — pending GRIB2 adapter
+# Source: ECCC MSC Datamart https://dd.meteo.gc.ca/today/model_cansips/100km/forecast/
+# Format: GRIB2 per-member files; HTTP adapter needs cfgrib extension
+# See: https://github.com/accord-research/rosetta/issues/2
+nmme/cansipsic4:
+  adapter: http
+  pending_url: true
+  pending_url_note: "Pending: CanSIPS-IC4 MSC Datamart is GRIB2 format; HTTP adapter needs cfgrib extension. Source URL requires adapter work. Track https://github.com/accord-research/rosetta/issues/2"
+  source_url: "https://dd.meteo.gc.ca/today/model_cansips/100km/forecast/"
+  variables:
+    precip:
+      native_name: PrecipRate
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: AirTemp
+      units: K
+      target_units: C
+    sst:
+      native_name: SeaSfcHeight-Geoid
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1981, 2010]
+
+nmme/cansipsic4-hindcast:
+  adapter: http
+  pending_url: true
+  pending_url_note: "Pending: CanSIPS-IC4 hindcast source URL not yet identified. Track https://github.com/accord-research/rosetta/issues/2"
+  source_url: null
+  variables:
+    precip:
+      native_name: PrecipRate
+      units: "mm/day"
+      target_units: "mm/day"
+    temp:
+      native_name: AirTemp
+      units: K
+      target_units: C
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    members: 20
+    hindcast_range: [1981, 2010]
