@@ -149,17 +149,17 @@ Deprecated products remain in the catalog and still function while IRI URLs resp
 
 | Product | Model | Frequency | Variables | Hindcast range |
 |---------|-------|-----------|-----------|----------------|
-| `c3s/ecmwf` | ECMWF SEAS51 | daily | precip, temp | 1981–2016 |
-| `c3s/ecmwf-monthly` | ECMWF SEAS51 | monthly | precip, temp | 1981–2016 |
-| `c3s/eccc-cansips` | ECCC CanSIPS (sys 3) | monthly | precip, temp | 1981–2010 |
-| `c3s/eccc-cansipsv3` | ECCC CanSIPS (sys 4) | monthly | precip, temp | 1993–2020 |
-| `c3s/meteofrance` | Météo-France (sys 9) | monthly | precip, temp | 1993–2018 |
-| `c3s/cmcc` | CMCC SPSv3.5 | monthly | precip, temp | 1993–2016 |
-| `c3s/dwd` | DWD GCFS 2.2 (sys 22) | monthly | precip, temp | 1993–2023 |
-| `c3s/dwd-gcfs21` | DWD GCFS 2.1 (sys 21) | monthly | precip, temp | 1993–2016 |
-| `c3s/ukmo` | UK Met Office (sys 604) | monthly | precip, temp | 1993–2016 |
-| `c3s/jma` | JMA CPS3 (sys 3) | monthly | precip, temp | 1993–2020 |
-| `c3s/jma-cps2` | JMA CPS2 (sys 2) | monthly | precip, temp | 1993–2016 |
+| `c3s/ecmwf` | ECMWF SEAS51 | daily | precip, temp, sst | 1981–2016 |
+| `c3s/ecmwf-monthly` | ECMWF SEAS51 | monthly | precip, temp, sst | 1981–2016 |
+| `c3s/eccc-cansips` | ECCC CanSIPS (sys 3) | monthly | precip, temp, sst | 1981–2010 |
+| `c3s/eccc-cansipsv3` | ECCC CanSIPS (sys 4) | monthly | precip, temp, sst | 1993–2020 |
+| `c3s/meteofrance` | Météo-France (sys 9) | monthly | precip, temp, sst | 1993–2018 |
+| `c3s/cmcc` | CMCC SPSv3.5 | monthly | precip, temp, sst | 1993–2016 |
+| `c3s/dwd` | DWD GCFS 2.2 (sys 22) | monthly | precip, temp, sst | 1993–2023 |
+| `c3s/dwd-gcfs21` | DWD GCFS 2.1 (sys 21) | monthly | precip, temp, sst | 1993–2016 |
+| `c3s/ukmo` | UK Met Office (sys 604) | monthly | precip, temp, sst | 1993–2016 |
+| `c3s/jma` | JMA CPS3 (sys 3) | monthly | precip, temp, sst | 1993–2020 |
+| `c3s/jma-cps2` | JMA CPS2 (sys 2) | monthly | precip, temp, sst | 1993–2016 |
 
 ### NMME forecasts (NCEI)
 
@@ -167,9 +167,9 @@ Daily forecast data from NCEI. Real-time forecasts only (2018+, no hindcasts fro
 
 | Product | Model | Members | Variables |
 |---------|-------|---------|-----------|
-| `nmme/ccsm4` | NCAR CCSM4 | 10 | precip, temp |
-| `nmme/geoss2s` | NASA GEOS-S2S | 4 | precip, temp |
-| `nmme/gemnemo` | CMC GEM-NEMO | 10 | precip, temp |
+| `nmme/ccsm4` | NCAR CCSM4 | 10 | precip, temp, sst |
+| `nmme/geoss2s` | NASA GEOS-S2S | 4 | precip, temp, sst |
+| `nmme/gemnemo` | CMC GEM-NEMO | 10 | precip, temp, sst |
 
 ### NMME hindcasts (S3)
 
@@ -183,6 +183,17 @@ Monthly hindcast data archived from IRI Data Library to S3 (`s3://acc.ord/nmme-h
 | `nmme/cesm1-hindcast` | NCAR CESM1 | 10 | 12 | 1991–2020 |
 | `nmme/canesm5-hindcast` | CMC CanESM5 | 20 | 12 | 1991–2020 |
 | `nmme/gem52nemo-hindcast` | CMC GEM5.2-NEMO | 20 | 12 | 1991–2020 |
+
+### NMME placeholders (pending source URL)
+
+| Product | Model | Variables | Notes |
+|---------|-------|-----------|-------|
+| `nmme/spear` | GFDL SPEAR | precip, temp, sst | Awaiting GFDL THREDDS/NODD public path |
+| `nmme/spear-hindcast` | GFDL SPEAR | precip, temp, sst | Awaiting GFDL THREDDS/NODD public path |
+| `nmme/spearb` | GFDL SPEARb | sst | Awaiting GFDL THREDDS/NODD public path |
+| `nmme/spearb-hindcast` | GFDL SPEARb | sst | Awaiting GFDL THREDDS/NODD public path |
+| `nmme/cansipsic4` | CanSIPS-IC4 | precip, temp, sst | MSC Datamart GRIB2, needs cfgrib work |
+| `nmme/cansipsic4-hindcast` | CanSIPS-IC4 | precip, temp | Hindcast source TBD |
 
 ### Other
 
@@ -219,6 +230,23 @@ EOF
 cd rosetta
 uv sync
 ```
+
+## Cache configuration
+
+Rosetta caches adapter downloads locally using [Nuthatch](https://github.com/rhiza-research/nuthatch). Cache files live in `~/.nuthatch/rosetta` by default (configured in `pyproject.toml`).
+
+**Inspect the cache:**
+```bash
+rosetta cache list
+```
+
+**Clear the cache:**
+```bash
+rosetta cache clear          # clears all
+rosetta cache clear --product nmme/cfsv2  # clears one product (with confirmation)
+```
+
+> **V2:** A public read-only shared cache mirror is planned for V2. V1 is local-only.
 
 ## Relationship to DeepScale
 
