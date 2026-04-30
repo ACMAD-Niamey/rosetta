@@ -4,6 +4,7 @@ from .base import AdapterBase
 from ..normalize import decode_months_since
 
 
+
 class OPeNDAPAdapter(AdapterBase):
     def health_check(self, product_config, probe_remote=False):
         url = product_config.get("source_url")

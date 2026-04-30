@@ -20,6 +20,7 @@ import xarray as xr
 from .base import AdapterBase
 
 
+
 def _scrape_filenames(url):
     """Scrape .nc filenames from an NCEI directory listing."""
     with urllib.request.urlopen(url, timeout=30) as resp:

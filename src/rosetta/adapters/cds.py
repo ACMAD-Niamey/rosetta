@@ -3,6 +3,7 @@ import xarray as xr
 from .base import AdapterBase
 
 
+
 class CDSAdapter(AdapterBase):
     def health_check(self, product_config, probe_remote=False):
         required = ["cds_dataset", "variables"]
