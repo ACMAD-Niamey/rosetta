@@ -67,6 +67,45 @@ All datasets are returned with canonical coordinate names regardless of the upst
 
 Numeric time encodings (e.g. "months since 1960-01-01") are automatically decoded to `datetime64`.
 
+## Dual-domain usage (SST + PRCP predictors)
+
+PyCPT's seasonal forecasting workflow uses two predictor domains per GCM: a large SST domain and a regional precipitation domain. Rosetta supports this with orthogonal `fetch()` calls — one per domain.
+
+```python
+import rosetta
+
+# SST predictor: large tropical domain
+sst_predictor = rosetta.fetch(
+    product="nmme/geoss2s",
+    variable="sst",
+    init="2025-02",
+    target="MAM",
+    region=[-20, 20, 30, 180],
+    hindcast=(1993, 2016),
+)
+
+# PRCP predictor: regional domain
+prcp_predictor = rosetta.fetch(
+    product="nmme/geoss2s",
+    variable="precip",
+    init="2025-02",
+    target="MAM",
+    region=[-20, 20, 10, 75],
+    hindcast=(1993, 2016),
+)
+
+# Predictand: observations
+predictand = rosetta.fetch(
+    product="obs/chirps-v2",
+    variable="precip",
+    target="MAM",
+    region=[-12, 15, 22, 52],
+    hindcast=(1993, 2016),
+)
+```
+
+`rosetta.fetch()` is a single-call API by design — there is no `fetch_predictor_pair()` wrapper. The two domains have different extents and variables per use case.
+
 ## Data hub concept (control plane)
 
 With a federated adapter model, the main risk is upstream drift (API changes, hosting changes, auth/license changes, schema drift). The data hub should be a lightweight **control plane** for observability:
@@ -89,6 +128,20 @@ rosetta.check_all_products(probe_remote=True)   # include live probes
 ```
 
 Each result includes `product`, `adapter`, `healthy`, `kind`, `message`, and `checked_at`.
+
+## Data source migration
+
+IRI Data Library (ldeo.columbia.edu) sunset in April 2026. The table below maps affected Rosetta products to their successors.
+
+| Old product | Old source | New product | New source | Status |
+|---|---|---|---|---|
+| `nmme/cfsv2` | IRI DL OPeNDAP | TBD | CCSR | tracking |
+| `nmme/cfsv2-forecast` | IRI DL OPeNDAP | TBD | CCSR | tracking |
+| `nmme/ccsm4-iri` | IRI DL OPeNDAP | `nmme/ccsm4` | NCEI | migrated |
+| `nmme/geoss2s-forecast` | IRI DL OPeNDAP | `nmme/geoss2s` | NCEI | migrated |
+| `c3s/ecmwf-seas51c` | IRI DL (iridl adapter) | `c3s/ecmwf-monthly` | CDS | migrated |
+
+Deprecated products remain in the catalog and still function while IRI URLs respond, but `rosetta.check_product()` emits a `DeprecationWarning` indicating the successor. Use `catalog.list_products(include_deprecated=False)` to exclude them.
 
 ## Available products
 
