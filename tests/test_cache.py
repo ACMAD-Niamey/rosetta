@@ -11,11 +11,12 @@ def test_fetch_has_no_local_cache_dir():
 
 
 def test_fetch_raw_is_nuthatch_cached():
-    """Caching lives in fetch._fetch_raw, not in individual adapters."""
+    """Caching lives in fetch._fetch_raw_cached, not in individual adapters."""
     src = _read_fetch_src()
     assert "from nuthatch import cache" in src, "fetch.py should import nuthatch cache"
-    assert "_fetch_raw" in src, "fetch.py should define _fetch_raw"
-    assert "@cache" in src, "fetch._fetch_raw should be decorated with @cache"
+    assert "_fetch_raw_cached" in src, "fetch.py should define _fetch_raw_cached"
+    assert "@cache" in src, "fetch._fetch_raw_cached should be decorated with @cache"
+    assert 'cache_args=["product"' in src, "cache key must include product"
 
 
 def test_adapters_do_not_have_nuthatch_cache():
@@ -63,7 +64,7 @@ def test_fetch_cache_false_bypasses_nuthatch():
     )
     fake_ds["precip"].attrs["units"] = "mm/day"
 
-    with patch("rosetta.fetch._fetch_raw") as mock_cached, \
+    with patch("rosetta.fetch._fetch_raw_cached") as mock_cached, \
          patch("rosetta.fetch.get_adapter") as mock_get_adapter:
         mock_adapter = MagicMock()
         mock_adapter.fetch_data.return_value = fake_ds
@@ -88,7 +89,7 @@ def test_fetch_cache_true_uses_nuthatch():
     )
     fake_ds["precip"].attrs["units"] = "mm/day"
 
-    with patch("rosetta.fetch._fetch_raw", return_value=fake_ds) as mock_cached:
+    with patch("rosetta.fetch._fetch_raw_cached", return_value=fake_ds) as mock_cached:
         from rosetta.fetch import fetch
         fetch("obs/chirps", variable="precip", cache=True)
         mock_cached.assert_called_once()

@@ -10,12 +10,24 @@ from .storage import save
 _CACHE_VERSION = 1  # bump when adapter logic or normalization changes
 
 
-@cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic")
 def _fetch_raw(product: str, variable: str, config: dict,
                date_range, region) -> xr.Dataset:
-    """Download raw (un-normalized) data from the adapter. Cached by nuthatch."""
+    """Download raw (un-normalized) data from the adapter. Cached by _fetch_raw_cached."""
     adapter = get_adapter(config["adapter"])
     return adapter.fetch_data(config, variable, date_range=date_range, region=region)
+
+
+@cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic",
+       cache_args=["product", "variable", "date_range", "region", "init_months"])
+def _fetch_raw_cached(product: str, variable: str, config: dict,
+                      date_range, region, init_months=None) -> xr.Dataset:
+    """Nuthatch-cached wrapper around _fetch_raw.
+
+    Cache key uses only the stable scalar arguments, not the full config dict,
+    to avoid dict-hashing issues. init_months is included because it determines
+    which seasonal slice is fetched.
+    """
+    return _fetch_raw(product, variable, config, date_range, region)
 
 SEASON_MONTHS = {
     "DJF": (12, 2), "JFM": (1, 3), "FMA": (2, 4), "MAM": (3, 5),
@@ -108,7 +120,10 @@ def fetch(product, variable, init=None, target=None, region=None,
 
     _log(verbose, f"downloading via adapter={config['adapter']}")
     if cache:
-        raw = _fetch_raw(product, variable, config, date_range, region)
+        raw = _fetch_raw_cached(
+            product, variable, config, date_range, region,
+            init_months=tuple(config.get("init_months", [])),
+        )
     else:
         raw = get_adapter(config["adapter"]).fetch_data(
             config, variable, date_range=date_range, region=region)
