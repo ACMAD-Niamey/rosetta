@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import tempfile
+import warnings
 import xarray as xr
 
 # ---------------------------------------------------------------------------
@@ -640,3 +641,45 @@ def test_opendap_year_filter_without_s_coord(monkeypatch):
         _nmme_product_config(), "precip", date_range=(2009, 2011),
     )
     assert list(result.year.values) == [2009, 2010, 2011]
+
+
+# ---------------------------------------------------------------------------
+# 9. Deprecation tests
+# ---------------------------------------------------------------------------
+
+def test_catalog_deprecated_entries():
+    from rosetta import catalog
+    deprecated = [p for p in catalog.list_products() if catalog.info(p).get("deprecated")]
+    assert len(deprecated) >= 5
+
+
+def test_catalog_info_deprecated():
+    from rosetta import catalog
+    info = catalog.info("nmme/cfsv2")
+    assert info["deprecated"] is True
+    assert "deprecated_after" in info
+    assert "successor" in info
+
+
+def test_catalog_info_not_deprecated():
+    from rosetta import catalog
+    info = catalog.info("c3s/ecmwf")
+    assert info.get("deprecated", False) is False
+
+
+def test_health_check_deprecated_emits_warning():
+    from rosetta import health
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = health.check_product("nmme/cfsv2")
+    assert any("deprecated" in str(warning.message).lower() for warning in w), \
+        f"Expected deprecation warning, got: {[str(x.message) for x in w]}"
+
+
+def test_health_check_non_deprecated_no_warning():
+    from rosetta import health
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        health.check_product("c3s/ecmwf")
+    deprecation_warnings = [x for x in w if "deprecated" in str(x.message).lower()]
+    assert len(deprecation_warnings) == 0

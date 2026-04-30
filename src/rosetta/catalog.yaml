@@ -1,5 +1,7 @@
 nmme/cfsv2:
   adapter: opendap
+  deprecated_after: "2026-04-30"
+  successor: null
   # NOTE: This uses PENTAD_SAMPLES/.MONTHLY which returns 28 members and all
   # 10 lead months per init.  When rosetta.fetch() is called with init= and
   # target=, the OPeNDAP adapter automatically selects and averages only the
@@ -29,6 +31,8 @@ nmme/cfsv2:
 
 nmme/cfsv2-forecast:
   adapter: opendap
+  deprecated_after: "2026-04-30"
+  successor: null
   source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.FORECAST/.PENTAD_SAMPLES/.MONTHLY"
   variables:
     precip:
@@ -48,6 +52,8 @@ nmme/cfsv2-forecast:
 # CCSM4 via IRI OPeNDAP (combined hindcast + forecast, 1982-present)
 nmme/ccsm4-iri:
   adapter: opendap
+  deprecated_after: "2026-04-30"
+  successor: "nmme/ccsm4"
   source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.COLA-RSMAS-CCSM4/.MONTHLY"
   variables:
     precip:
@@ -67,6 +73,8 @@ nmme/ccsm4-iri:
 # GEOSS2S forecast via IRI OPeNDAP (2017-present, 10 members)
 nmme/geoss2s-forecast:
   adapter: opendap
+  deprecated_after: "2026-04-30"
+  successor: "nmme/geoss2s"
   source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NASA-GEOSS2S/.FORECAST/.MONTHLY"
   variables:
     precip:
@@ -691,6 +699,8 @@ c3s/ecmwf-monthly:
 
 c3s/ecmwf-seas51c:
   adapter: iridl
+  deprecated_after: "2026-04-30"
+  successor: "c3s/ecmwf-monthly"
   iridl_path: "SOURCES/.EU/.Copernicus/.CDS/.C3S/.ECMWF/.SEAS51_iri2/.appended"
   variables:
     precip:
