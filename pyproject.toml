@@ -36,6 +36,7 @@ testpaths = ["tests"]
 markers = [
     "integration: requires network access",
     "cds: requires CDS credentials in ~/.cdsapirc",
+    "network: requires live network access to remote data sources",
 ]
 
 [tool.nuthatch]
