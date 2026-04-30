@@ -247,6 +247,7 @@ def _fetch_rosetta_da(product, variable, init_month, target, hindcast, region):
         region=region,
         verbose=False,
         progress=False,
+        cache=False,
     )
 
     da = ds[variable]

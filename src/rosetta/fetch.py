@@ -4,6 +4,7 @@ from nuthatch import cache
 from . import catalog
 from .adapters import get_adapter
 from .normalize import normalize
+
 from .storage import save
 
 _CACHE_VERSION = 1  # bump when adapter logic or normalization changes
@@ -50,10 +51,11 @@ def parse_init(init):
 
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
-          progress=True):
+          progress=True, cache=True):
     """Fetch, normalize, and optionally save climate data.
 
-    Caching is handled by _fetch_raw() via @nuthatch.cache().
+    cache=True (default): results are cached locally via nuthatch.
+    cache=False: bypass the cache and fetch fresh from the source.
     """
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
@@ -105,7 +107,11 @@ def fetch(product, variable, init=None, target=None, region=None,
             config["target_range"] = target_range
 
     _log(verbose, f"downloading via adapter={config['adapter']}")
-    raw = _fetch_raw(product, variable, config, date_range, region)
+    if cache:
+        raw = _fetch_raw(product, variable, config, date_range, region)
+    else:
+        raw = get_adapter(config["adapter"]).fetch_data(
+            config, variable, date_range=date_range, region=region)
     _log(verbose, "normalizing dataset")
     clean = normalize(raw, config, variable, region)
 

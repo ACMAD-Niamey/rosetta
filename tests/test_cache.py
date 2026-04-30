@@ -51,6 +51,49 @@ def test_cli_cache_list_invokable():
         f"CLI exited with unexpected code {result.exit_code}: {result.output}"
 
 
+def test_fetch_cache_false_bypasses_nuthatch():
+    """fetch(cache=False) calls the adapter directly, skipping _fetch_raw."""
+    import numpy as np
+    import xarray as xr
+    from unittest.mock import patch, MagicMock
+
+    fake_ds = xr.Dataset(
+        {"precip": (["lat", "lon"], np.ones((3, 3), dtype=np.float32))},
+        coords={"lat": [0.0, 1.0, 2.0], "lon": [30.0, 31.0, 32.0]},
+    )
+    fake_ds["precip"].attrs["units"] = "mm/day"
+
+    with patch("rosetta.fetch._fetch_raw") as mock_cached, \
+         patch("rosetta.fetch.get_adapter") as mock_get_adapter:
+        mock_adapter = MagicMock()
+        mock_adapter.fetch_data.return_value = fake_ds
+        mock_get_adapter.return_value = mock_adapter
+
+        from rosetta.fetch import fetch
+        fetch("obs/chirps", variable="precip", cache=False)
+
+        mock_cached.assert_not_called()
+        mock_adapter.fetch_data.assert_called_once()
+
+
+def test_fetch_cache_true_uses_nuthatch():
+    """fetch(cache=True) routes through _fetch_raw."""
+    import numpy as np
+    import xarray as xr
+    from unittest.mock import patch
+
+    fake_ds = xr.Dataset(
+        {"precip": (["lat", "lon"], np.ones((3, 3), dtype=np.float32))},
+        coords={"lat": [0.0, 1.0, 2.0], "lon": [30.0, 31.0, 32.0]},
+    )
+    fake_ds["precip"].attrs["units"] = "mm/day"
+
+    with patch("rosetta.fetch._fetch_raw", return_value=fake_ds) as mock_cached:
+        from rosetta.fetch import fetch
+        fetch("obs/chirps", variable="precip", cache=True)
+        mock_cached.assert_called_once()
+
+
 def test_cli_is_registered_in_pyproject():
     import tomllib
     from pathlib import Path
