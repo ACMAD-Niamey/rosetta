@@ -197,6 +197,13 @@ def test_get_adapter_unknown_raises():
         get_adapter("unknown")
 
 
+def test_get_adapter_sheerwater():
+    from rosetta.adapters import get_adapter
+    from rosetta.adapters.sheerwater import SheerwaterAdapter
+    adapter = get_adapter("sheerwater")
+    assert isinstance(adapter, SheerwaterAdapter)
+
+
 # ---------------------------------------------------------------------------
 # 5. Date/season parsing tests
 # ---------------------------------------------------------------------------
