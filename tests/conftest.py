@@ -98,3 +98,30 @@ def synthetic_obs_monthly_ds():
         {"precip": (["time", "latitude", "longitude"], data)},
         coords={"time": times, "latitude": lat, "longitude": lon},
     )
+
+
+# Mapping of PyCPT predictor names to (rosetta_product, variable) pairs.
+PYCPT_REFERENCE_GCMS = {
+    # PRCP predictors
+    "GEOSS2S.PRCP":       ("nmme/geoss2s",         "precip"),
+    "SPEAR.PRCP":         ("nmme/spear",            "precip"),
+    "CCSM4.PRCP":         ("nmme/ccsm4-iri",        "precip"),
+    "CFSv2.PRCP":         ("nmme/cfsv2",            "precip"),
+    "CanSIPSIC4.PRCP":    ("nmme/cansipsic4",       "precip"),
+    "SEAS51c.PRCP":       ("c3s/ecmwf-seas51c",     "precip"),
+    "SPSv3p5.PRCP":       ("c3s/cmcc",              "precip"),
+    "GCFS2p1.PRCP":       ("c3s/dwd-gcfs21",        "precip"),
+    "CPS2.PRCP":          ("c3s/jma-cps2",          "precip"),
+    "METEOFRANCE9.PRCP":  ("c3s/meteofrance",       "precip"),
+    # SST predictors
+    "GEOSS2S.SST":        ("nmme/geoss2s",           "sst"),
+    "SPEARb.SST":         ("nmme/spearb",            "sst"),
+    "CCSM4.SST":          ("nmme/ccsm4",             "sst"),
+    "CFSv2.SST":          ("nmme/cfsv2",             "sst"),
+    "CanSIPSIC4.SST":     ("nmme/cansipsic4",        "sst"),
+    "SEAS51c.SST":        ("c3s/ecmwf-seas51c",      "sst"),
+    "SPSv3p5.SST":        ("c3s/cmcc",               "sst"),
+    "GCFS2p1.SST":        ("c3s/dwd-gcfs21",         "sst"),
+    "CPS2.SST":           ("c3s/jma-cps2",           "sst"),
+    "METEOFRANCE9.SST":   ("c3s/meteofrance",        "sst"),
+}

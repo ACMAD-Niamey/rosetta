@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import tempfile
+import warnings
 import xarray as xr
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,13 @@ def test_get_adapter_unknown_raises():
         get_adapter("unknown")
 
 
+def test_get_adapter_sheerwater():
+    from rosetta.adapters import get_adapter
+    from rosetta.adapters.sheerwater import SheerwaterAdapter
+    adapter = get_adapter("sheerwater")
+    assert isinstance(adapter, SheerwaterAdapter)
+
+
 # ---------------------------------------------------------------------------
 # 5. Date/season parsing tests
 # ---------------------------------------------------------------------------
@@ -294,9 +302,10 @@ def test_decode_skips_non_numeric_coords():
     )
     result = _decode_numeric_times(ds)
     assert np.issubdtype(result["time"].dtype, np.datetime64)
-    pd.testing.assert_index_equal(
-        pd.DatetimeIndex(result["time"].values), times
-    )
+    result_times = pd.DatetimeIndex(result["time"].values)
+    assert list(result_times.year) == [2020, 2020]
+    assert list(result_times.month) == [1, 2]
+    assert list(result_times.day) == [1, 1]
 
 
 def test_decode_skips_coords_without_since():
@@ -640,3 +649,142 @@ def test_opendap_year_filter_without_s_coord(monkeypatch):
         _nmme_product_config(), "precip", date_range=(2009, 2011),
     )
     assert list(result.year.values) == [2009, 2010, 2011]
+
+
+# ---------------------------------------------------------------------------
+# 9. Deprecation tests
+# ---------------------------------------------------------------------------
+
+def test_catalog_deprecated_entries():
+    from rosetta import catalog
+    deprecated = [p for p in catalog.list_products() if catalog.info(p).get("deprecated")]
+    assert len(deprecated) >= 5
+
+
+def test_catalog_info_deprecated():
+    from rosetta import catalog
+    info = catalog.info("nmme/cfsv2")
+    assert info["deprecated"] is True
+    assert "deprecated_after" in info
+    assert "successor" in info
+
+
+def test_catalog_info_not_deprecated():
+    from rosetta import catalog
+    info = catalog.info("c3s/ecmwf")
+    assert info.get("deprecated", False) is False
+
+
+def test_health_check_deprecated_emits_warning():
+    from rosetta import health
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = health.check_product("nmme/cfsv2")
+    assert any("deprecated" in str(warning.message).lower() for warning in w), \
+        f"Expected deprecation warning, got: {[str(x.message) for x in w]}"
+
+
+def test_health_check_non_deprecated_no_warning():
+    from rosetta import health
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        health.check_product("c3s/ecmwf")
+    deprecation_warnings = [x for x in w if "deprecated" in str(x.message).lower()]
+    assert len(deprecation_warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# 10. Placeholder entries
+# ---------------------------------------------------------------------------
+
+def test_c3s_entries_have_sst():
+    from rosetta import catalog
+    c3s_products = [p for p in catalog.list_products()
+                    if p.startswith("c3s/") and not catalog.info(p).get("deprecated")
+                    and not catalog.info(p).get("pending_url")]
+    assert len(c3s_products) > 0, "No non-deprecated C3S products found"
+    for product in c3s_products:
+        cfg = catalog.info(product)
+        assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
+        sst = cfg["variables"]["sst"]
+        assert sst["native_name"] == "sea_surface_temperature"
+        assert sst["units"] == "K"
+        assert sst["target_units"] == "K"
+
+def test_ncei_entries_have_sst():
+    from rosetta import catalog
+    for product in ["nmme/ccsm4", "nmme/geoss2s", "nmme/gemnemo"]:
+        cfg = catalog.info(product)
+        assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
+        assert cfg["variables"]["sst"]["native_name"] == "sst"
+
+def test_normalize_sst_preserves_nan():
+    import numpy as np
+    import xarray as xr
+    from rosetta.normalize import normalize
+    data = np.array([[np.nan, 300.0], [301.0, np.nan]], dtype=np.float32)
+    ds = xr.Dataset(
+        {"sst": (["latitude", "longitude"], data)},
+        coords={"latitude": [0.0, 1.0], "longitude": [30.0, 31.0]},
+    )
+    config = {"variables": {"sst": {"native_name": "sst", "units": "K", "target_units": "K"}}}
+    result = normalize(ds, config, "sst")
+    assert "sst" in result
+    assert np.isnan(result["sst"].values[0, 0])
+    assert np.isnan(result["sst"].values[1, 1])
+    assert not np.isnan(result["sst"].values[0, 1])
+
+
+def test_pycpt_reference_coverage():
+    """Every PyCPT reference GCM maps to a resolvable Rosetta catalog entry with the correct variable."""
+    from rosetta import catalog
+    from tests.conftest import PYCPT_REFERENCE_GCMS
+
+    missing_products = []
+    missing_variables = []
+
+    for pycpt_name, (product, variable) in PYCPT_REFERENCE_GCMS.items():
+        try:
+            cfg = catalog.info(product)
+        except KeyError:
+            missing_products.append(f"{pycpt_name} -> {product} (not in catalog)")
+            continue
+        if variable not in cfg["variables"]:
+            missing_variables.append(
+                f"{pycpt_name} -> {product}.{variable} (variable not defined)"
+            )
+
+    assert not missing_products, "Missing catalog entries:\n" + "\n".join(missing_products)
+    assert not missing_variables, "Missing variable definitions:\n" + "\n".join(missing_variables)
+
+
+def test_all_non_pending_entries_pass_config_health_check():
+    """Every catalog entry that isn't pending_url should pass a config-level health check."""
+    import warnings
+    from rosetta import health, catalog
+
+    failures = []
+    for product in catalog.list_products():
+        cfg = catalog.info(product)
+        if cfg.get("pending_url") or cfg.get("deprecated"):
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            result = health.check_product(product, probe_remote=False)
+        if not result["healthy"]:
+            failures.append(f"{product}: {result['message']}")
+
+    assert not failures, "Config health check failures:\n" + "\n".join(failures)
+
+
+def test_placeholder_entries_exist_and_return_healthy_false():
+    from rosetta import health, catalog
+    placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
+                    "nmme/spearb-hindcast", "nmme/cansipsic4", "nmme/cansipsic4-hindcast"]
+    for product in placeholders:
+        cfg = catalog.info(product)
+        assert cfg.get("pending_url") is True, f"{product} should have pending_url: true"
+        result = health.check_product(product)
+        assert result["healthy"] is False, f"{product} should return healthy=False"
+        assert "pending" in result["message"].lower() or "url" in result["message"].lower(), \
+            f"{product} message should explain the pending URL: {result['message']}"

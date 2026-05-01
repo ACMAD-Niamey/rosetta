@@ -2,7 +2,7 @@
 name = "rosetta"
 version = "0.1.0"
 description = "Canonical data acquisition for seasonal climate forecasting"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "xarray",
     "numpy",
@@ -12,12 +12,17 @@ dependencies = [
     "cdsapi>=0.7.7",
     "tqdm",
     "rioxarray",
+    "sheerwater>=0.2.5",
+    "nuthatch>=0.4.9",
 ]
 
 [project.optional-dependencies]
 s3 = ["boto3"]
 dev = ["pytest"]
 demo = ["matplotlib", "cartopy", "rasterio"]
+
+[project.scripts]
+rosetta = "rosetta.cli:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -31,4 +36,13 @@ testpaths = ["tests"]
 markers = [
     "integration: requires network access",
     "cds: requires CDS credentials in ~/.cdsapirc",
+    "network: requires live network access to remote data sources",
 ]
+
+[tool.nuthatch]
+# V1: root and local both point to the same local filesystem path.
+# Public mirror is a V2 item.
+[tool.nuthatch.root]
+filesystem = "~/.nuthatch/rosetta"
+[tool.nuthatch.local]
+filesystem = "~/.nuthatch/rosetta"

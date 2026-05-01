@@ -21,6 +21,7 @@ import xarray as xr
 from .base import AdapterBase
 
 
+
 def _s3_exists(s3_path):
     result = subprocess.run(
         ["aws", "s3", "ls", s3_path],

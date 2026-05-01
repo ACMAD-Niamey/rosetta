@@ -29,6 +29,7 @@ def _check_dataset(ds, variable, region=None):
 # ── OPeNDAP ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_cfsv2_precip():
     ds = rosetta.fetch(
         product="nmme/cfsv2",
@@ -42,6 +43,7 @@ def test_fetch_nmme_cfsv2_precip():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_cfsv2_temp():
     ds = rosetta.fetch(
         product="nmme/cfsv2",
@@ -57,6 +59,7 @@ def test_fetch_nmme_cfsv2_temp():
 # ── NCEI ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_ccsm4_precip():
     ds = rosetta.fetch(
         product="nmme/ccsm4",
@@ -73,6 +76,7 @@ def test_fetch_nmme_ccsm4_precip():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_ccsm4_temp():
     ds = rosetta.fetch(
         product="nmme/ccsm4",
@@ -89,6 +93,7 @@ def test_fetch_nmme_ccsm4_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_geoss2s_precip():
     ds = rosetta.fetch(
         product="nmme/geoss2s",
@@ -105,6 +110,7 @@ def test_fetch_nmme_geoss2s_precip():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_geoss2s_temp():
     ds = rosetta.fetch(
         product="nmme/geoss2s",
@@ -121,6 +127,7 @@ def test_fetch_nmme_geoss2s_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_gemnemo_precip():
     ds = rosetta.fetch(
         product="nmme/gemnemo",
@@ -137,6 +144,7 @@ def test_fetch_nmme_gemnemo_precip():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_nmme_gemnemo_temp():
     ds = rosetta.fetch(
         product="nmme/gemnemo",
@@ -155,6 +163,7 @@ def test_fetch_nmme_gemnemo_temp():
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_chirps_precip():
     ds = rosetta.fetch(
         product="obs/chirps",
@@ -170,6 +179,7 @@ def test_fetch_chirps_precip():
 # Tests cover: two geographies, two non-adjacent years, multi-year series.
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_ersst_v5_east_africa_recent():
     ds = rosetta.fetch(
         product="sst/ersst-v5",
@@ -186,6 +196,7 @@ def test_fetch_ersst_v5_east_africa_recent():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_ersst_v5_west_pacific_historical():
     # Warm-pool region, well inside 0..360 longitude convention
     region = [-10, 10, 140, 180]
@@ -204,6 +215,7 @@ def test_fetch_ersst_v5_west_pacific_historical():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 def test_fetch_ersst_v5_multiyear_timeseries():
     ds = rosetta.fetch(
         product="sst/ersst-v5",
@@ -223,6 +235,7 @@ def test_fetch_ersst_v5_multiyear_timeseries():
 # ── CDS (require credentials) ───────────────────────────────────────────────
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_c3s_ecmwf_precip():
     ds = rosetta.fetch(
@@ -240,6 +253,7 @@ def test_fetch_c3s_ecmwf_precip():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_c3s_ecmwf_temp():
     ds = rosetta.fetch(
@@ -257,6 +271,7 @@ def test_fetch_c3s_ecmwf_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_c3s_ecmwf_monthly_temp():
     ds = rosetta.fetch(
@@ -271,6 +286,7 @@ def test_fetch_c3s_ecmwf_monthly_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_eccc_cansips_temp():
     ds = rosetta.fetch(
@@ -288,6 +304,7 @@ def test_fetch_eccc_cansips_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_eccc_cansipsv3_temp():
     ds = rosetta.fetch(
@@ -305,6 +322,7 @@ def test_fetch_eccc_cansipsv3_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_meteofrance_temp():
     ds = rosetta.fetch(
@@ -322,6 +340,7 @@ def test_fetch_meteofrance_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_cmcc_temp():
     ds = rosetta.fetch(
@@ -339,6 +358,7 @@ def test_fetch_cmcc_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_dwd_temp():
     ds = rosetta.fetch(
@@ -356,6 +376,7 @@ def test_fetch_dwd_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_ukmo_temp():
     ds = rosetta.fetch(
@@ -373,6 +394,7 @@ def test_fetch_ukmo_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_jma_temp():
     ds = rosetta.fetch(
@@ -391,6 +413,7 @@ def test_fetch_jma_temp():
 
 
 @pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.cds
 def test_fetch_era5_temp():
     ds = rosetta.fetch(
