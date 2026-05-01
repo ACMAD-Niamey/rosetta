@@ -102,4 +102,6 @@ class CDSAdapter(AdapterBase):
             client.retrieve(dataset, request, tmp.name)
             if verbose:
                 print("[rosetta:cds] download complete")
-            return xr.open_dataset(tmp.name)
+            # decode_timedelta=False works around an xarray 2025.1.0 assertion
+            # that fails when pandas returns timedelta64[us] instead of [ns].
+            return xr.open_dataset(tmp.name, decode_timedelta=False)
