@@ -1,6 +1,9 @@
+import os
 import tempfile
+import zipfile
 import xarray as xr
 from .base import AdapterBase
+from .._paths import get_tmpdir
 
 
 
@@ -98,10 +101,58 @@ class CDSAdapter(AdapterBase):
 
         if verbose:
             print(f"[rosetta:cds] request dataset={dataset} years={len(request['year'])}")
-        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-            client.retrieve(dataset, request, tmp.name)
+        tmpdir = get_tmpdir()
+        with tempfile.NamedTemporaryFile(
+            suffix=".nc", delete=False, dir=tmpdir
+        ) as tmp:
+            download_path = tmp.name
+        extract_dir = None
+        try:
+            client.retrieve(dataset, request, download_path)
             if verbose:
                 print("[rosetta:cds] download complete")
-            # decode_timedelta=False works around an xarray 2025.1.0 assertion
-            # that fails when pandas returns timedelta64[us] instead of [ns].
-            return xr.open_dataset(tmp.name, decode_timedelta=False)
+            # CDS silently delivers a zip for datasets that don't support
+            # `download_format: unarchived` (e.g. seasonal-original-single-levels
+            # daily requests). Detect by magic bytes, extract, and combine.
+            if zipfile.is_zipfile(download_path):
+                extract_dir = tempfile.mkdtemp(prefix="rosetta_cds_", dir=tmpdir)
+                with zipfile.ZipFile(download_path) as zf:
+                    zf.extractall(extract_dir)
+                ncs = sorted(
+                    os.path.join(extract_dir, f)
+                    for f in os.listdir(extract_dir)
+                    if f.endswith(".nc")
+                )
+                if not ncs:
+                    raise RuntimeError(
+                        f"CDS returned a zip with no .nc files: {os.listdir(extract_dir)}"
+                    )
+                if verbose:
+                    print(f"[rosetta:cds] extracted {len(ncs)} netCDF file(s) from zip")
+                # decode_timedelta=False works around an xarray 2025.1.0 assertion
+                # that fails when pandas returns timedelta64[us] instead of [ns].
+                if len(ncs) == 1:
+                    open_kwargs = {"decode_timedelta": False}
+                    with xr.open_dataset(ncs[0], **open_kwargs) as opened:
+                        ds = opened.load()
+                else:
+                    with xr.open_mfdataset(
+                        ncs, decode_timedelta=False, combine="by_coords"
+                    ) as opened:
+                        ds = opened.load()
+            else:
+                with xr.open_dataset(download_path, decode_timedelta=False) as opened:
+                    ds = opened.load()
+            # Eager load + close detaches ds from any on-disk file. Required for
+            # the nuthatch cache: pickling a lazy ds stores only a reopen recipe
+            # pointing at this temp file, which gets cleaned up by macOS and
+            # breaks the cache across sessions (issue #24).
+            return ds
+        finally:
+            try:
+                os.unlink(download_path)
+            except OSError:
+                pass
+            if extract_dir is not None:
+                import shutil
+                shutil.rmtree(extract_dir, ignore_errors=True)

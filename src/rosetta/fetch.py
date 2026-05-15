@@ -7,7 +7,7 @@ from .normalize import normalize
 
 from .storage import save
 
-_CACHE_VERSION = 1  # bump when adapter logic or normalization changes
+_CACHE_VERSION = 2  # bump when adapter logic or normalization changes
 
 
 def _fetch_raw(product: str, variable: str, config: dict,
