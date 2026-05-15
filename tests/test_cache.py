@@ -241,6 +241,60 @@ def test_cache_false_never_uses_cached_result():
     assert call_count["cached"] == 0, "cache=False must never call _fetch_raw_cached"
 
 
+def test_fetch_uses_cache_on_second_call(tmp_path, monkeypatch):
+    """Second fetch with the same args MUST hit the cache, not re-call the adapter.
+
+    Regression test for issue #24: the CDS adapter previously returned lazy
+    datasets that pickled as a 'reopen this temp file' recipe. The first fetch
+    wrote a 7KB cache pointing at a /var/folders/.../T/ path; macOS reaped that
+    path, breaking the cache. This test exercises the real nuthatch round-trip
+    (read-after-write, no `_fetch_raw_cached` mock), which a regression to a
+    lazy adapter return would fail when the second call accesses .values.
+    """
+    import numpy as np
+    import xarray as xr
+    from unittest.mock import patch, MagicMock
+    from nuthatch.config import NuthatchConfig
+
+    # Redirect nuthatch to a per-test cache dir. NUTHATCH_* env vars alone
+    # aren't enough because nuthatch reads the wrapped module's pyproject.toml
+    # AFTER env vars and wrapped_config wins (nuthatch/config.py:290-293).
+    # Suppress the pyproject lookup so env vars take effect.
+    monkeypatch.setenv("NUTHATCH_ROOT_FILESYSTEM", str(tmp_path))
+    monkeypatch.setenv("NUTHATCH_LOCAL_FILESYSTEM", str(tmp_path))
+    monkeypatch.setattr(NuthatchConfig, "_find_nuthatch_config",
+                        lambda self, p: None)
+
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"],
+                    np.arange(24, dtype=np.float32).reshape(6, 4))},
+        coords={"lat": np.arange(6.0), "lon": np.arange(4.0)},
+    )
+    ds["precip"].attrs["units"] = "mm/month"
+
+    adapter = MagicMock()
+    adapter.fetch_data.return_value = ds
+
+    with patch("rosetta.fetch.get_adapter", return_value=adapter):
+        from rosetta.fetch import fetch
+        first = fetch("obs/chirps", variable="precip", cache=True, verbose=False)
+        assert adapter.fetch_data.call_count == 1, \
+            "First fetch must call the adapter"
+
+        second = fetch("obs/chirps", variable="precip", cache=True, verbose=False)
+        assert adapter.fetch_data.call_count == 1, (
+            "Second fetch must hit the cache and skip the adapter — "
+            "got call_count={}".format(adapter.fetch_data.call_count)
+        )
+
+    # Forcing array access catches the issue #24 failure mode: a lazy dataset
+    # whose backing file got reaped would raise FileNotFoundError here.
+    np.testing.assert_array_equal(
+        np.asarray(second["precip"]),
+        np.asarray(first["precip"]),
+    )
+
+
 def test_cli_is_registered_in_pyproject():
     import tomllib
     from pathlib import Path

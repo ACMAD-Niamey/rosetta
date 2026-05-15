@@ -273,6 +273,53 @@ def test_fetch_c3s_ecmwf_temp():
 @pytest.mark.integration
 @pytest.mark.network
 @pytest.mark.cds
+def test_fetch_c3s_ecmwf_precip_no_target_through_cache():
+    """Reproduce issue #24: daily CDS fetch hangs in the nuthatch cache layer.
+
+    Emmett's exact reproduction:
+        rosetta.fetch('c3s/ecmwf', 'precip', init='2026-02', region=[-13, 23, 21, 52])
+
+    Without `target`, fetch.py leaves `leadtime_hour` unset, so the CDS adapter
+    (cds.py:92-93) falls back to the default 214-day range × 51 members — a much
+    larger payload than the targeted daily tests above. Reported symptom: 0% CPU
+    indefinitely after the `[rosetta:cds] download complete` log, with the cdsapi
+    TCP socket in CLOSE_WAIT.
+
+    cache=True (default) so we exercise the nuthatch write path. A SIGALRM-based
+    timeout converts the hang into a hard test failure instead of blocking the
+    suite indefinitely.
+    """
+    import signal
+
+    region = [-13, 23, 21, 52]
+
+    def _on_alarm(signum, frame):
+        raise TimeoutError(
+            "rosetta.fetch hung past 1800s after CDS download — see issue #24"
+        )
+
+    old_handler = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.alarm(1800)
+    try:
+        ds = rosetta.fetch(
+            product="c3s/ecmwf",
+            variable="precip",
+            init="2026-02",
+            region=region,
+            verbose=True,
+        )
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+    _check_dataset(ds, "precip", region)
+    assert ds["precip"].attrs["units"] == "mm/day"
+    assert "lead_time" in ds.dims
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
 def test_fetch_c3s_ecmwf_monthly_temp():
     ds = rosetta.fetch(
         product="c3s/ecmwf-monthly",
