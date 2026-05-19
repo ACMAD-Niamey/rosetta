@@ -63,17 +63,37 @@ def parse_init(init):
 
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
-          progress=True, cache=True):
+          progress=True, cache=True, allow_partial=False,
+          max_retries=3, retry_backoff=1.0, request_interval=0.0):
     """Fetch, normalize, and optionally save climate data.
 
     cache=True (default): results are cached locally via nuthatch.
     cache=False: bypass the cache and fetch fresh from the source.
+
+    allow_partial=False (default): adapters that fetch multiple files raise
+    if any requested file fails, so partial results never reach the cache or
+    downstream metrics. Set True to opt into best-effort behaviour (returns
+    whatever subset succeeded). Currently honoured by the HTTP adapter.
+
+    max_retries / retry_backoff: per-file retry budget for transient fetch
+    failures (rate-limit responses, network blips). Each retry waits
+    retry_backoff * 2**attempt seconds with jitter. Set max_retries=0 to
+    disable. Currently honoured by the HTTP adapter.
+
+    request_interval: minimum seconds between successive file opens (shared
+    across worker threads). Use this to stay under a server's
+    requests-per-second budget. Default 0 = no pacing. Currently honoured by
+    the HTTP adapter.
     """
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
     config = dict(catalog.get(product))
     config["_verbose"] = verbose
     config["_progress"] = progress
+    config["_allow_partial"] = allow_partial
+    config["_max_retries"] = max_retries
+    config["_retry_backoff"] = retry_backoff
+    config["_request_interval"] = request_interval
 
     date_range = hindcast
 

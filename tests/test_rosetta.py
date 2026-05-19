@@ -777,6 +777,186 @@ def test_all_non_pending_entries_pass_config_health_check():
     assert not failures, "Config health check failures:\n" + "\n".join(failures)
 
 
+def _http_product_config(**overrides):
+    config = {
+        "adapter": "http",
+        "source_url": "https://fake/",
+        "file_pattern": "fake-{year}.{month:02d}.cog",
+        "format": "cog",
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/month",
+                       "target_units": "mm/day"},
+        },
+        "_verbose": False,
+        "_progress": False,
+    }
+    config.update(overrides)
+    return config
+
+
+def _fake_cog_ds(year, month):
+    ts = pd.Timestamp(f"{year}-{month:02d}-01")
+    da = xr.DataArray(
+        np.ones((2, 2), dtype="float32"),
+        dims=("latitude", "longitude"),
+        coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+    )
+    return da.to_dataset(name="precip").expand_dims(time=[ts])
+
+
+def test_http_adapter_strict_raises_on_any_failure(monkeypatch):
+    """Default (allow_partial=False) must abort if any per-file open fails."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        m = re.search(r"(\d{4})\.(\d{2})", url)
+        year, month = int(m.group(1)), int(m.group(2))
+        # Pretend the second month of the second year is poisoned.
+        if year == 2011 and month == 2:
+            raise RuntimeError("not recognized as being in a supported file format.")
+        return _fake_cog_ds(year, month)
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", fake_open)
+
+    adapter = http_mod.HTTPAdapter()
+    with pytest.raises(RuntimeError, match="1/24 file"):
+        adapter.fetch_data(_http_product_config(), "precip", date_range=(2010, 2011))
+
+
+def test_http_adapter_allow_partial_returns_partial(monkeypatch):
+    """Opt-in best-effort path concatenates whatever succeeded."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        m = re.search(r"(\d{4})\.(\d{2})", url)
+        year, month = int(m.group(1)), int(m.group(2))
+        if year == 2011 and month == 2:
+            raise RuntimeError("synthetic failure")
+        return _fake_cog_ds(year, month)
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", fake_open)
+
+    adapter = http_mod.HTTPAdapter()
+    config = _http_product_config(_allow_partial=True)
+    result = adapter.fetch_data(config, "precip", date_range=(2010, 2011))
+    # 24 requested, 1 failed → 23 time steps survive.
+    assert result.sizes["time"] == 23
+
+
+def test_http_adapter_strict_succeeds_when_all_files_load(monkeypatch):
+    """Strict mode passes through cleanly when nothing fails."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        m = re.search(r"(\d{4})\.(\d{2})", url)
+        return _fake_cog_ds(int(m.group(1)), int(m.group(2)))
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", fake_open)
+
+    adapter = http_mod.HTTPAdapter()
+    result = adapter.fetch_data(_http_product_config(), "precip", date_range=(2010, 2010))
+    assert result.sizes["time"] == 12
+
+
+def test_http_adapter_retries_recover_from_transient_failure(monkeypatch):
+    """Per-file retries should absorb transient errors."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    # Each (year, month) fails twice, then succeeds. With max_retries=3 we
+    # should still end up with all 12 months.
+    attempts = {}
+    def flaky_open(url, region, variable=None, fill_value=None):
+        m = re.search(r"(\d{4})\.(\d{2})", url)
+        key = (int(m.group(1)), int(m.group(2)))
+        attempts[key] = attempts.get(key, 0) + 1
+        if attempts[key] <= 2:
+            raise RuntimeError("transient: not a supported file format.")
+        return _fake_cog_ds(*key)
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", flaky_open)
+    # Speed the test up — no real sleeps.
+    monkeypatch.setattr(http_mod.time, "sleep", lambda _s: None)
+
+    adapter = http_mod.HTTPAdapter()
+    config = _http_product_config(_max_retries=3, _retry_backoff=0.0)
+    result = adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    assert result.sizes["time"] == 12
+    # Each file: 2 failures + 1 success = 3 attempts.
+    assert all(v == 3 for v in attempts.values())
+
+
+def test_http_adapter_retries_exhaust_then_raise(monkeypatch):
+    """After the retry budget is spent, strict mode raises for the run."""
+    from rosetta.adapters import http as http_mod
+
+    def always_fail(url, region, variable=None, fill_value=None):
+        raise RuntimeError("persistent: not a supported file format.")
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", always_fail)
+    monkeypatch.setattr(http_mod.time, "sleep", lambda _s: None)
+
+    adapter = http_mod.HTTPAdapter()
+    config = _http_product_config(_max_retries=2, _retry_backoff=0.0)
+    with pytest.raises(RuntimeError, match="12/12 file"):
+        adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+
+
+def test_http_adapter_does_not_retry_http_4xx(monkeypatch):
+    """4xx errors are permanent — file doesn't exist, retries can't help."""
+    from rosetta.adapters import http as http_mod
+
+    attempts = {"n": 0}
+    def four_oh_four(url, region, variable=None, fill_value=None):
+        attempts["n"] += 1
+        raise RuntimeError("HTTP response code: 404")
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", four_oh_four)
+    monkeypatch.setattr(http_mod.time, "sleep", lambda _s: None)
+
+    adapter = http_mod.HTTPAdapter()
+    # max_retries=5: if we wrongly retried 4xx, we'd see ~6 attempts per file
+    # × 12 files = 72. Correct behaviour: one attempt per file, no retries.
+    config = _http_product_config(_max_retries=5, _retry_backoff=0.0)
+    with pytest.raises(RuntimeError, match="12/12 file"):
+        adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    assert attempts["n"] == 12  # one attempt per file, no retries
+
+
+def test_http_adapter_rate_limiter_enforces_minimum_interval(monkeypatch):
+    """request_interval gates successive opens at the configured rate."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        m = re.search(r"(\d{4})\.(\d{2})", url)
+        return _fake_cog_ds(int(m.group(1)), int(m.group(2)))
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset", fake_open)
+
+    # Stub time.monotonic + time.sleep so we can observe sleep durations
+    # without making the test wallclock-slow.
+    clock = [0.0]
+    sleeps = []
+    monkeypatch.setattr(http_mod.time, "monotonic", lambda: clock[0])
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock[0] += s
+    monkeypatch.setattr(http_mod.time, "sleep", fake_sleep)
+
+    adapter = http_mod.HTTPAdapter()
+    config = _http_product_config(_request_interval=0.25)
+    adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    # First call: no wait (last=0, elapsed=0 < 0.25 would still sleep 0.25 since
+    # _last starts at 0; first iteration also paces). 12 files → at least 11
+    # interval waits ≈ 0.25s each.
+    paced = [s for s in sleeps if s >= 0.2]
+    assert len(paced) >= 11
+
+
 def test_placeholder_entries_exist_and_return_healthy_false():
     from rosetta import health, catalog
     placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
