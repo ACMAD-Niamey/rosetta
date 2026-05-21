@@ -131,7 +131,7 @@ def test_different_products_call_adapter_separately():
 
     call_log = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
         call_log.append(product)
         if product == "obs/chirps":
             return chirps_ds
@@ -158,7 +158,7 @@ def test_different_regions_call_adapter_separately():
 
     call_regions = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
         call_regions.append(region)
         ds = xr.Dataset(
             {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},
@@ -184,7 +184,7 @@ def test_different_date_ranges_call_adapter_separately():
 
     call_date_ranges = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
         call_date_ranges.append(date_range)
         ds = xr.Dataset(
             {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},

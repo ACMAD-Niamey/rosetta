@@ -12,6 +12,7 @@ _COORD_RENAMES = {
     # Temporal – forecast
     "S": "init_time", "forecast_reference_time": "init_time", "indexing_time": "init_time",
     "L": "lead_time", "forecastMonth": "lead_time", "forecast_period": "lead_time",
+    "step": "lead_time",
     # Ensemble
     "M": "member", "number": "member",
 }
@@ -73,6 +74,15 @@ def _decode_numeric_times(ds):
 
 def normalize(ds, product_config, variable, region=None):
     ds = _decode_numeric_times(ds)
+
+    # ECMWF S2S GRIB files use `time` as the (scalar) init issuance and
+    # `valid_time` as the per-step forecast time. The rename map below sends
+    # `valid_time → time`, which would collide with the existing scalar `time`.
+    # If `time` is scalar (not a dim), pre-rename it to `init_time` so the
+    # collision can't happen.
+    if ("time" in ds.coords and "time" not in ds.dims
+            and "init_time" not in ds.coords and "init_time" not in ds.dims):
+        ds = ds.rename({"time": "init_time"})
 
     renames = {k: v for k, v in _COORD_RENAMES.items() if k in ds.dims or k in ds.coords}
     if renames:

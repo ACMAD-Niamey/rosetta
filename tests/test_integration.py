@@ -501,6 +501,33 @@ def test_fetch_c3s_ecmwf_monthly_temp():
 @pytest.mark.integration
 @pytest.mark.network
 @pytest.mark.cds
+def test_fetch_c3s_ecmwf_s2s_precip():
+    """End-to-end fetch of one ECMWF S2S issuance for a small East Africa box.
+
+    Requires ECDS credentials in ~/.cdsapirc (the ecds.ecmwf.int endpoint,
+    not the Copernicus CDS one). The catalog entry overrides cds_url to point
+    at the right endpoint; the user's key in ~/.cdsapirc must match.
+    """
+    ds = rosetta.fetch(
+        product="c3s/ecmwf-s2s",
+        variable="precip",
+        init="2026-05-18",       # a recent Monday; bump if archive cycles this out
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == "mm/day"
+    # S2S forecasts out to ~46 days at 24h steps. After deaccumulation
+    # rosetta drops the first step, so we expect ~46 lead_time entries.
+    assert ds.sizes["lead_time"] >= 20
+    assert ds.sizes["member"] >= 2          # perturbed ensemble has 50+
+    assert "init_time" in ds.coords          # scalar issuance date
+    assert "time" in ds.coords               # 1-D valid forecast time
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
 def test_fetch_eccc_cansips_temp():
     ds = rosetta.fetch(
         product="c3s/eccc-cansips",
