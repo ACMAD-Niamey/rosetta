@@ -1,4 +1,6 @@
 import os
+import re
+import shutil
 import tempfile
 import zipfile
 import xarray as xr
@@ -52,8 +54,14 @@ class CDSAdapter(AdapterBase):
         # production queues, but they hide real errors behind ~17h of silent retry.
         # 12 × 30s = 6min max covers legit queue waits while failing fast enough to
         # surface the underlying CDS response.
-        client = cdsapi.Client(retry_max=12, sleep_max=30, timeout=60,
-                               quiet=not verbose)
+        # Allow products to override the CDS endpoint URL — ECDS
+        # (ecds.ecmwf.int) carries S2S data on a different endpoint than the
+        # standard Copernicus CDS.
+        client_kwargs = dict(retry_max=12, sleep_max=30, timeout=60,
+                             quiet=not verbose)
+        if "cds_url" in product_config:
+            client_kwargs["url"] = product_config["cds_url"]
+        client = cdsapi.Client(**client_kwargs)
         var_cfg = product_config["variables"][variable]
         dataset = product_config["cds_dataset"]
 
@@ -62,6 +70,88 @@ class CDSAdapter(AdapterBase):
             "data_format": "netcdf",
             "download_format": "unarchived",
         }
+
+        if dataset == "s2s-forecasts":
+            # Sub-seasonal forecasts have a different request shape than the
+            # seasonal datasets handled below: single-day issuance, forecast_type
+            # selector, Mars-style leadtime range, `origin` not `originating_centre`.
+            init_date = product_config.get("_init_date")
+            if not init_date:
+                raise ValueError(
+                    "s2s-forecasts requires _init_date (YYYY-MM-DD) in product "
+                    "config; pass it via fetch(..., init='YYYY-MM-DD')."
+                )
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(init_date)):
+                raise ValueError(
+                    f"_init_date must be YYYY-MM-DD format, got {init_date!r}. "
+                    f"Example: '2026-05-12'."
+                )
+            y, m, d = init_date.split("-")
+            request["year"] = y
+            request["month"] = m
+            request["day"] = d
+            request["forecast_type"] = product_config.get(
+                "forecast_type", "perturbed_forecast")
+            request["time"] = product_config.get("forecast_time", "00:00")
+            if "cds_model" in product_config:
+                request["origin"] = product_config["cds_model"]
+            request["leadtime_hour"] = [
+                str(h) for h in product_config.get("leadtime_hour", ["0/to/1104/by/24"])
+            ]
+            # level_type is required by ECDS — without it the MARS request lands
+            # in a test partition (marsth-ecmwf) with no data, producing
+            # MarsNoDataError. Surface variables use "single_level"; pressure
+            # variables would override with "pressure" via the catalog.
+            request["level_type"] = product_config.get("level_type", "single_level")
+            if region:
+                lat_s, lat_n, lon_w, lon_e = region
+                request["area"] = [lat_n, lon_w, lat_s, lon_e]
+            if verbose:
+                print(f"[rosetta:cds] s2s request dataset={dataset} "
+                      f"init={init_date} forecast_type={request['forecast_type']}")
+            tmpdir = get_tmpdir()
+            with tempfile.NamedTemporaryFile(
+                suffix=".nc", delete=False, dir=tmpdir
+            ) as tmp:
+                download_path = tmp.name
+            extract_dir = None
+            try:
+                client.retrieve(dataset, request, download_path)
+                if verbose:
+                    print("[rosetta:cds] download complete")
+                if zipfile.is_zipfile(download_path):
+                    extract_dir = tempfile.mkdtemp(prefix="rosetta_cds_", dir=tmpdir)
+                    with zipfile.ZipFile(download_path) as zf:
+                        zf.extractall(extract_dir)
+                    ncs = sorted(
+                        os.path.join(extract_dir, f)
+                        for f in os.listdir(extract_dir)
+                        if f.endswith(".nc")
+                    )
+                    if not ncs:
+                        raise RuntimeError(
+                            f"CDS returned a zip with no .nc files: "
+                            f"{os.listdir(extract_dir)}"
+                        )
+                    if len(ncs) == 1:
+                        with xr.open_dataset(ncs[0], decode_timedelta=False) as opened:
+                            ds = opened.load()
+                    else:
+                        with xr.open_mfdataset(
+                            ncs, decode_timedelta=False, combine="by_coords"
+                        ) as opened:
+                            ds = opened.load()
+                else:
+                    with xr.open_dataset(download_path, decode_timedelta=False) as opened:
+                        ds = opened.load()
+                return ds
+            finally:
+                try:
+                    os.unlink(download_path)
+                except OSError:
+                    pass
+                if extract_dir is not None:
+                    shutil.rmtree(extract_dir, ignore_errors=True)
 
         for key in ("product_type", "system"):
             if key in product_config:
@@ -154,5 +244,4 @@ class CDSAdapter(AdapterBase):
             except OSError:
                 pass
             if extract_dir is not None:
-                import shutil
                 shutil.rmtree(extract_dir, ignore_errors=True)

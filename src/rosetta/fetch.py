@@ -7,7 +7,7 @@ from .normalize import normalize
 
 from .storage import save
 
-_CACHE_VERSION = 2  # bump when adapter logic or normalization changes
+_CACHE_VERSION = 3  # bump when adapter logic or normalization changes
 
 
 def _fetch_raw(product: str, variable: str, config: dict,
@@ -18,14 +18,17 @@ def _fetch_raw(product: str, variable: str, config: dict,
 
 
 @cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic",
-       cache_args=["product", "variable", "date_range", "region", "init_months"])
+       cache_args=["product", "variable", "date_range", "region", "init_months",
+                   "init_date"])
 def _fetch_raw_cached(product: str, variable: str, config: dict,
-                      date_range, region, init_months=None) -> xr.Dataset:
+                      date_range, region, init_months=None,
+                      init_date=None) -> xr.Dataset:
     """Nuthatch-cached wrapper around _fetch_raw.
 
     Cache key uses only the stable scalar arguments, not the full config dict,
     to avoid dict-hashing issues. init_months is included because it determines
-    which seasonal slice is fetched.
+    which seasonal slice is fetched; init_date is included because S2S
+    forecasts are keyed on a single issuance date.
     """
     return _fetch_raw(product, variable, config, date_range, region)
 
@@ -57,6 +60,10 @@ def parse_target(target, year=None):
 def parse_init(init):
     if isinstance(init, str):
         from datetime import datetime
+        if len(init) == 10:
+            # YYYY-MM-DD (S2S-style daily issuance)
+            return datetime.strptime(init, "%Y-%m-%d")
+        # YYYY-MM (seasonal-style monthly init)
         return datetime.strptime(init[:7], "%Y-%m")
     return init
 
@@ -103,6 +110,12 @@ def fetch(product, variable, init=None, target=None, region=None,
         if date_range is None:
             date_range = (init_dt.year, init_dt.year)
 
+        # For sub-daily / single-issuance datasets (S2S), thread the original
+        # date string through to the adapter so it can build a single-day request.
+        # The seasonal datasets ignore _init_date and use init_months instead.
+        if isinstance(init, str) and len(init) == 10:
+            config["_init_date"] = init
+
         if target:
             target_range = parse_target(target, year=init_dt.year)
             s_month, e_month = target_range[0].month, target_range[1].month
@@ -143,6 +156,7 @@ def fetch(product, variable, init=None, target=None, region=None,
         raw = _fetch_raw_cached(
             product, variable, config, date_range, region,
             init_months=tuple(config.get("init_months", [])),
+            init_date=config.get("_init_date"),
         )
     else:
         raw = get_adapter(config["adapter"]).fetch_data(

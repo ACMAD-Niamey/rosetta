@@ -161,6 +161,14 @@ Deprecated products remain in the catalog and still function while IRI URLs resp
 | `c3s/jma` | JMA CPS3 (sys 3) | monthly | precip, temp, sst | 1993–2020 |
 | `c3s/jma-cps2` | JMA CPS2 (sys 2) | monthly | precip, temp, sst | 1993–2016 |
 
+### C3S sub-seasonal forecasts (ECDS)
+
+| Product | Model | Frequency | Lead horizon | Variables | Endpoint |
+|---------|-------|-----------|--------------|-----------|----------|
+| `c3s/ecmwf-s2s` | ECMWF S2S | twice weekly (Mon/Thu) | 0–46 days | precip | ECMWF Data Store (`ecds.ecmwf.int`) |
+
+S2S issuances are date-keyed: call with `init="YYYY-MM-DD"` (the issuance date) rather than `init="YYYY-MM"`. The catalog entry overrides `cds_url` to point at the ECMWF Data Store, which is a separate service from the Copernicus CDS — see [ECMWF Data Store (ECDS) setup](#ecmwf-data-store-ecds-setup) for credentials and licence acceptance.
+
 ### NMME forecasts (NCEI)
 
 Daily forecast data from NCEI. Real-time forecasts only (2018+, no hindcasts from this source).
@@ -209,22 +217,69 @@ Output is always NetCDF (extensible to Zarr/GeoTIFF).
 
 Most growth should come from catalog entries and adapters, not core workflow changes. See [TODO.md](TODO.md) for planned products, storage evolution, and federated deployment roadmap.
 
-## Quick CDS setup
+## CDS / ECDS setup
 
-For products using the `cds` adapter (all `c3s/*` products and `obs/era5`):
+Rosetta's `cds` adapter talks to two distinct ECMWF endpoints:
+
+- **Copernicus Climate Data Store** (`cds.climate.copernicus.eu`) — most `c3s/*` products and `obs/era5`.
+- **ECMWF Data Store** (`ecds.ecmwf.int`) — newer service, currently used by `c3s/ecmwf-s2s` (sub-seasonal forecasts) and likely future S2S/TIGGE products.
+
+They are separate services with separate accounts, separate API keys, and separate licence-acceptance flows. The catalog entry per product specifies which endpoint to use via a `cds_url` override; you need credentials and accepted licences for each endpoint you intend to fetch from.
+
+### Copernicus CDS setup
+
+For Copernicus CDS products (all `c3s/*` except `c3s/ecmwf-s2s`, plus `obs/era5`):
 
 1. Create a CDS account and API key at <https://cds.climate.copernicus.eu>.
 2. Add credentials to `~/.cdsapirc`:
 
-```bash
-cat > ~/.cdsapirc << 'EOF'
-url: https://cds.climate.copernicus.eu/api
-key: <YOUR-API-KEY>
-EOF
-```
+   ```bash
+   cat > ~/.cdsapirc << 'EOF'
+   url: https://cds.climate.copernicus.eu/api
+   key: <YOUR-CDS-API-KEY>
+   EOF
+   ```
 
-3. Accept required dataset licenses in CDS before first download.
-4. Install project dependencies:
+3. **Accept required dataset licences** in the CDS web UI before your first download. Each dataset page has a "Terms of use" section near the bottom of the page; you must tick the boxes there once per account. If `rosetta.fetch()` fails with a 403, the error message names the specific dataset(s) missing acceptance.
+
+### ECMWF Data Store (ECDS) setup
+
+Required for `c3s/ecmwf-s2s` (and any future product whose catalog entry has `cds_url: "https://ecds.ecmwf.int/api"`). ECDS is a separate service from the Copernicus CDS — you cannot reuse Copernicus CDS credentials.
+
+1. Create an ECMWF account at <https://www.ecmwf.int/> if you don't have one. Log in to <https://ecds.ecmwf.int/> and retrieve your API key from your profile/account settings (the link appears in the top-right after login).
+
+2. Configure `cdsapi` to use the ECDS endpoint. The simplest setup, if you only use ECDS, is to replace `~/.cdsapirc`:
+
+   ```bash
+   cat > ~/.cdsapirc << 'EOF'
+   url: https://ecds.ecmwf.int/api
+   key: <YOUR-ECDS-API-KEY>
+   EOF
+   ```
+
+   If you also use the Copernicus CDS, maintain both endpoints — for example by keeping the Copernicus CDS in `~/.cdsapirc` and passing the ECDS URL+key explicitly via the `CDSAPI_URL` / `CDSAPI_KEY` environment variables, or by switching `~/.cdsapirc` per session.
+
+3. **Accept the two layers of ECDS licences.** ECDS rejects requests with HTTP 403 until both are accepted:
+
+   a. **Site-wide Terms of Use.** Required once per account. Accepted from the ECDS profile/settings UI after login. The current revision (as of mid-2026) is **"Terms of use of the ECMWF Data Store (rev. 12)"**.
+
+   b. **Dataset-specific licence.** Each dataset has an additional licence that must be ticked on the dataset's own page. For S2S, that page is:
+
+      <https://ecds.ecmwf.int/datasets/s2s-forecasts?tab=download#manage-licences>
+
+      Tick every licence listed in the "Manage licences" section. The pattern for other datasets is the same: `https://ecds.ecmwf.int/datasets/<dataset-id>?tab=download#manage-licences`.
+
+   If you skip step 3, the first `fetch()` will fail with a 403 and a message naming exactly which licence(s) are missing and linking to the manage-licences page — so this is easy to fix iteratively.
+
+4. Test the connection:
+
+   ```bash
+   uv run pytest tests/test_integration.py::test_fetch_c3s_ecmwf_s2s_precip -v
+   ```
+
+> **Heads up — ECDS is in transitional beta.** Both the old WEB-API and the new CDS-API are available to S2S/TIGGE users for a limited time as ECMWF migrates from the old Public Datasets service. Rosetta's CDS adapter uses the new CDS-API path. See <https://confluence.ecmwf.int/x/-wUiEw> for ECMWF's migration notes.
+
+### Install dependencies
 
 ```bash
 cd rosetta
