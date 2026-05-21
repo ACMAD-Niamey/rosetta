@@ -175,6 +175,172 @@ def test_fetch_chirps_precip():
     assert ds["precip"].attrs["units"] == "mm/day"
 
 
+# ── HTTP adapter: retries + rate limiting (local flaky NetCDF server) ───────
+# An in-process HTTP server with controllable failures verifies retry and
+# request_interval behavior end-to-end through the real urllib stack. We use
+# the NetCDF path here (not COG) because urllib opens each file as a single
+# request, which makes "fail N times then succeed" semantics unambiguous;
+# GDAL/vsicurl issues many range reads per COG and ties them to a per-process
+# response cache, both of which obscure what a test is actually asserting.
+# The COG path shares the same _with_retry / _RateLimiter plumbing, so this
+# test exercises the contract that matters.
+
+
+def _make_tiny_netcdf(path, year, month):
+    """Write a 2x2 netcdf the adapter will accept and reshape via _subset_region."""
+    import numpy as np
+    import xarray as xr
+    arr = np.full((2, 2), float(year * 100 + month), dtype="float32")
+    ds = xr.Dataset(
+        {"precip": (["latitude", "longitude"], arr)},
+        coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+    )
+    ds.to_netcdf(path)
+
+
+class _FlakyServer:
+    """In-process HTTP server that optionally fails the first `fail_first_n`
+    requests per URL with a 503. Tracks per-URL hit counts.
+    """
+
+    def __init__(self, files_root, fail_first_n=0):
+        import os
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        self.files_root = files_root
+        self.fail_first_n = fail_first_n
+        self.hits = {}
+        self._lock = threading.Lock()
+        outer = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt, *args):
+                pass  # silence stderr
+
+            def do_GET(self):
+                with outer._lock:
+                    outer.hits[self.path] = outer.hits.get(self.path, 0) + 1
+                    attempt = outer.hits[self.path]
+                if attempt <= outer.fail_first_n:
+                    self.send_response(503)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                full = os.path.join(outer.files_root, self.path.lstrip("/"))
+                if not os.path.isfile(full):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                with open(full, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Type", "application/octet-stream")
+                self.end_headers()
+                self.wfile.write(body)
+
+        self._server = HTTPServer(("127.0.0.1", 0), _Handler)
+        self.port = self._server.server_address[1]
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def base_url(self):
+        return f"http://127.0.0.1:{self.port}/"
+
+    def stop(self):
+        self._server.shutdown()
+        self._thread.join(timeout=2)
+
+
+def _local_netcdf_config(base_url, **overrides):
+    config = {
+        "adapter": "http",
+        "source_url": base_url,
+        "file_pattern": "fake-{year}.{month:02d}.nc",
+        "format": "netcdf",
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/month",
+                       "target_units": "mm/day"},
+        },
+        "_verbose": False,
+        "_progress": False,
+    }
+    config.update(overrides)
+    return config
+
+
+@pytest.mark.integration
+def test_http_adapter_retries_recover_against_real_flaky_server(tmp_path):
+    """End-to-end: real HTTP requests hit a 503-then-200 server, retries
+    absorb the failures, all 12 months land cleanly."""
+    from rosetta.adapters.http import HTTPAdapter
+    for month in range(1, 13):
+        _make_tiny_netcdf(str(tmp_path / f"fake-2010.{month:02d}.nc"), 2010, month)
+    server = _FlakyServer(str(tmp_path), fail_first_n=2)
+    try:
+        config = _local_netcdf_config(
+            server.base_url,
+            _max_retries=3,
+            _retry_backoff=0.05,
+        )
+        adapter = HTTPAdapter()
+        result = adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+        assert result.sizes["time"] == 12
+        # Each URL was hit (2 forced failures + 1 success) = 3 times.
+        assert all(count == 3 for count in server.hits.values())
+    finally:
+        server.stop()
+
+
+@pytest.mark.integration
+def test_http_adapter_retries_exhaust_against_persistent_failure(tmp_path):
+    """When the retry budget is exhausted, strict mode raises rather than
+    quietly returning a partial dataset."""
+    from rosetta.adapters.http import HTTPAdapter
+    for month in range(1, 13):
+        _make_tiny_netcdf(str(tmp_path / f"fake-2010.{month:02d}.nc"), 2010, month)
+    server = _FlakyServer(str(tmp_path), fail_first_n=10)
+    try:
+        config = _local_netcdf_config(
+            server.base_url,
+            _max_retries=2,
+            _retry_backoff=0.01,
+        )
+        adapter = HTTPAdapter()
+        with pytest.raises(RuntimeError, match="12/12 file"):
+            adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    finally:
+        server.stop()
+
+
+@pytest.mark.integration
+def test_http_adapter_rate_limiter_paces_real_requests(tmp_path):
+    """request_interval enforces a real wallclock floor between file opens
+    even when worker threads would otherwise fire them concurrently."""
+    import time as _time
+    from rosetta.adapters.http import HTTPAdapter
+    for month in range(1, 13):
+        _make_tiny_netcdf(str(tmp_path / f"fake-2010.{month:02d}.nc"), 2010, month)
+    server = _FlakyServer(str(tmp_path), fail_first_n=0)
+    try:
+        config = _local_netcdf_config(
+            server.base_url,
+            _request_interval=0.15,
+        )
+        adapter = HTTPAdapter()
+        t0 = _time.monotonic()
+        result = adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+        elapsed = _time.monotonic() - t0
+        # 12 files at 0.15s spacing ≈ 1.8s lower bound. Allow CI slack —
+        # the point is that pacing dominates the 8-worker pool's concurrency.
+        assert elapsed >= 11 * 0.15 * 0.9
+        assert result.sizes["time"] == 12
+    finally:
+        server.stop()
+
+
 # ── Observational SST (ERSST v5, NOAA NCEI HTTP) ────────────────────────────
 # Tests cover: two geographies, two non-adjacent years, multi-year series.
 
