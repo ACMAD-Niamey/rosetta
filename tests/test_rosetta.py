@@ -968,3 +968,67 @@ def test_placeholder_entries_exist_and_return_healthy_false():
         assert result["healthy"] is False, f"{product} should return healthy=False"
         assert "pending" in result["message"].lower() or "url" in result["message"].lower(), \
             f"{product} message should explain the pending URL: {result['message']}"
+
+
+# ---------------------------------------------------------------------------
+# 11. S2S reforecast plumbing tests
+# ---------------------------------------------------------------------------
+
+def test_fetch_reforecast_kwarg_plumbs_to_adapter(monkeypatch):
+    """rosetta.fetch(reforecast=True) sets config['_reforecast']=True on the adapter call."""
+    import rosetta
+    from rosetta.adapters.cds import CDSAdapter
+
+    captured = {}
+
+    def fake_fetch_data(self, config, variable, date_range=None, region=None):
+        captured["reforecast"] = config.get("_reforecast", False)
+        # Return a tiny well-formed dataset so the rest of fetch() succeeds.
+        import xarray as xr, numpy as np
+        return xr.Dataset(
+            {"tp": (["latitude", "longitude"], np.zeros((2, 2), dtype="float32"))},
+            coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+        )
+
+    monkeypatch.setattr(CDSAdapter, "fetch_data", fake_fetch_data)
+
+    rosetta.fetch(
+        product="c3s/ecmwf-s2s",
+        variable="precip",
+        init="2026-05-15",
+        region=[-2, 2, 36, 40],
+        reforecast=True,
+        cache=False,
+        verbose=False,
+    )
+
+    assert captured["reforecast"] is True
+
+
+def test_fetch_reforecast_defaults_false(monkeypatch):
+    """Omitting reforecast defaults to False."""
+    import rosetta
+    from rosetta.adapters.cds import CDSAdapter
+
+    captured = {}
+
+    def fake_fetch_data(self, config, variable, date_range=None, region=None):
+        captured["reforecast"] = config.get("_reforecast", "missing")
+        import xarray as xr, numpy as np
+        return xr.Dataset(
+            {"tp": (["latitude", "longitude"], np.zeros((2, 2), dtype="float32"))},
+            coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+        )
+
+    monkeypatch.setattr(CDSAdapter, "fetch_data", fake_fetch_data)
+
+    rosetta.fetch(
+        product="c3s/ecmwf-s2s",
+        variable="precip",
+        init="2026-05-15",
+        region=[-2, 2, 36, 40],
+        cache=False,
+        verbose=False,
+    )
+
+    assert captured["reforecast"] is False

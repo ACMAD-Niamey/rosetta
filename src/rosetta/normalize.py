@@ -84,6 +84,15 @@ def normalize(ds, product_config, variable, region=None):
             and "init_time" not in ds.coords and "init_time" not in ds.dims):
         ds = ds.rename({"time": "init_time"})
 
+    # ECMWF S2S reforecast responses carry an `hdate` dimension — the
+    # calendar issuance dates of each historical reforecast. Convert to
+    # integer years and rename to `year` so the output matches the
+    # (year, member, lead_time, lat, lon) hindcast convention used
+    # downstream. Must run before _COORD_RENAMES.
+    if "hdate" in ds.dims:
+        years = ds["hdate"].dt.year.values
+        ds = ds.assign_coords(hdate=years).rename({"hdate": "year"})
+
     renames = {k: v for k, v in _COORD_RENAMES.items() if k in ds.dims or k in ds.coords}
     if renames:
         ds = ds.rename(renames)

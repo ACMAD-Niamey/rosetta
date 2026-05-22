@@ -71,7 +71,8 @@ def parse_init(init):
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
-          max_retries=3, retry_backoff=1.0, request_interval=0.0):
+          max_retries=3, retry_backoff=1.0, request_interval=0.0,
+          reforecast=False):
     """Fetch, normalize, and optionally save climate data.
 
     cache=True (default): results are cached locally via nuthatch.
@@ -91,6 +92,10 @@ def fetch(product, variable, init=None, target=None, region=None,
     across worker threads). Use this to stay under a server's
     requests-per-second budget. Default 0 = no pacing. Currently honoured by
     the HTTP adapter.
+
+    reforecast: when True, fetch the reforecast (hindcast) suite associated
+    with the given issuance instead of the forecast itself. Currently
+    honoured by the CDS adapter's s2s-forecasts branch.
     """
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
@@ -101,6 +106,12 @@ def fetch(product, variable, init=None, target=None, region=None,
     config["_max_retries"] = max_retries
     config["_retry_backoff"] = retry_backoff
     config["_request_interval"] = request_interval
+
+    # Reforecast mode is meaningful only for S2S right now, but plumb it
+    # generically through the adapter config (outside the `if init:` block) so
+    # the flag is set regardless of whether `init` was supplied — guarding
+    # against a silent fall-through to forecast mode in mis-calls.
+    config["_reforecast"] = bool(reforecast)
 
     date_range = hindcast
 

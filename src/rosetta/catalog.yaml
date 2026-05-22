@@ -807,6 +807,10 @@ c3s/ecmwf-s2s:
   cds_url: "https://ecds.ecmwf.int/api"
   cds_model: "ecmwf"               # threaded into request as `origin`
   forecast_type: "perturbed_forecast"
+  # Optional: forecast_type to send when fetch(reforecast=True). Defaults to
+  # "reforecast" (perturbed reforecast ensemble); set to "cf_reforecast" for
+  # the single-member control reforecast.
+  reforecast_type: "reforecast"
   level_type: "single_level"       # required by ECDS; without it MARS finds nothing
   variables:
     precip:
