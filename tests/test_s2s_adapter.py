@@ -272,3 +272,175 @@ def test_two_s2s_fetches_with_different_init_dates_distinct_in_cache(
         f"Cache collision: 2 distinct inits should produce 2 adapter calls, "
         f"got {len(fake.calls)}. The second fetch was silently served from cache."
     )
+
+
+# ---------------------------------------------------------------------------
+# Reforecast-mode request shape (Plan: 2026-05-21-ecmwf-s2s-reforecast)
+# ---------------------------------------------------------------------------
+
+def test_s2s_reforecast_sets_perturbed_reforecast_forecast_type(monkeypatch):
+    """When _reforecast is True, forecast_type defaults to 'reforecast'."""
+    fake = _FakeCDSClient()
+    monkeypatch.setattr("cdsapi.Client", lambda *a, **kw: fake)
+
+    adapter = CDSAdapter()
+    config = _s2s_product_config()
+    config["_init_date"] = "2026-05-15"
+    config["_reforecast"] = True
+    adapter.fetch_data(config, "precip", region=[-2, 2, 36, 40])
+
+    assert len(fake.calls) == 1
+    _, request, _ = fake.calls[0]
+    assert request["forecast_type"] == "reforecast"
+
+
+def test_s2s_reforecast_honors_explicit_reforecast_type_override(monkeypatch):
+    """A `reforecast_type` in the catalog overrides the default reforecast value."""
+    fake = _FakeCDSClient()
+    monkeypatch.setattr("cdsapi.Client", lambda *a, **kw: fake)
+
+    adapter = CDSAdapter()
+    config = _s2s_product_config(reforecast_type="cf_reforecast")
+    config["_init_date"] = "2026-05-15"
+    config["_reforecast"] = True
+    adapter.fetch_data(config, "precip", region=[-2, 2, 36, 40])
+
+    _, request, _ = fake.calls[0]
+    assert request["forecast_type"] == "cf_reforecast"
+
+
+def test_s2s_reforecast_does_not_affect_non_reforecast_calls(monkeypatch):
+    """Without _reforecast=True, forecast_type is unchanged (the existing forecast path)."""
+    fake = _FakeCDSClient()
+    monkeypatch.setattr("cdsapi.Client", lambda *a, **kw: fake)
+
+    adapter = CDSAdapter()
+    config = _s2s_product_config()
+    config["_init_date"] = "2026-05-15"
+    config["_reforecast"] = False
+    adapter.fetch_data(config, "precip", region=[-2, 2, 36, 40])
+
+    _, request, _ = fake.calls[0]
+    assert request["forecast_type"] == "perturbed_forecast"
+
+
+# ---------------------------------------------------------------------------
+# Reforecast normalization (hdate → year)
+# ---------------------------------------------------------------------------
+
+def _make_reforecast_like_dataset():
+    """A stub xr.Dataset whose dims/coords mimic what CDS returns for a
+    reforecast request: hdate (datetime), number (member), step (lead),
+    latitude, longitude."""
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    hdates = pd.to_datetime([
+        "2006-05-15", "2007-05-15", "2008-05-15", "2009-05-15", "2010-05-15",
+    ])
+    return xr.Dataset(
+        {
+            "tp": (
+                ["hdate", "number", "step", "latitude", "longitude"],
+                np.zeros((5, 3, 4, 2, 2), dtype="float32"),
+            ),
+        },
+        coords={
+            "hdate": hdates,
+            "number": [0, 1, 2],
+            "step": pd.to_timedelta([24, 48, 72, 96], unit="h"),
+            "latitude": [0.0, 1.0],
+            "longitude": [0.0, 1.0],
+        },
+    )
+
+
+def test_normalize_renames_hdate_to_year_with_integer_years():
+    """hdate (datetime64) becomes year (int) after normalization."""
+    from rosetta.normalize import normalize
+    config = _s2s_product_config()
+    ds = _make_reforecast_like_dataset()
+    out = normalize(ds, config, "precip")
+    assert "year" in out.dims
+    assert "hdate" not in out.dims
+    assert out["year"].dtype.kind == "i"
+    assert list(out["year"].values) == [2006, 2007, 2008, 2009, 2010]
+
+
+def test_normalize_preserves_other_s2s_dims():
+    """After hdate→year, the rest of the renames (number→member, step→lead_time) still work."""
+    from rosetta.normalize import normalize
+    config = _s2s_product_config()
+    ds = _make_reforecast_like_dataset()
+    out = normalize(ds, config, "precip")
+    assert "member" in out.dims
+    assert "lead_time" in out.dims
+    assert "lat" in out.dims
+    assert "lon" in out.dims
+    assert set(out["precip"].dims) >= {"year", "member", "lead_time", "lat", "lon"}
+
+
+# ---------------------------------------------------------------------------
+# End-to-end fetch(reforecast=True)
+# ---------------------------------------------------------------------------
+
+class _FakeReforecastClient:
+    """Stub CDS client that writes a reforecast-shaped netCDF to `target`."""
+
+    def __init__(self, *args, **kwargs):
+        self.calls = []
+
+    def retrieve(self, dataset, request, target):
+        self.calls.append((dataset, dict(request), target))
+        import numpy as np
+        import pandas as pd
+        import xarray as xr
+        hdates = pd.to_datetime([
+            "2006-05-15", "2007-05-15", "2008-05-15", "2009-05-15", "2010-05-15",
+        ])
+        ds = xr.Dataset(
+            {
+                "tp": (
+                    ["hdate", "number", "step", "latitude", "longitude"],
+                    np.zeros((5, 3, 4, 2, 2), dtype="float32"),
+                ),
+            },
+            coords={
+                "hdate": hdates,
+                "number": [0, 1, 2],
+                "step": pd.to_timedelta([24, 48, 72, 96], unit="h"),
+                "latitude": [0.0, 1.0],
+                "longitude": [0.0, 1.0],
+            },
+        )
+        ds.to_netcdf(target)
+
+
+def test_fetch_reforecast_end_to_end_returns_year_indexed_dataset(monkeypatch, tmp_path):
+    """rosetta.fetch(reforecast=True) returns a Dataset with year/member/lead_time/lat/lon dims."""
+    import rosetta
+
+    fake = _FakeReforecastClient()
+    monkeypatch.setattr("cdsapi.Client", lambda *a, **kw: fake)
+
+    result = rosetta.fetch(
+        product="c3s/ecmwf-s2s",
+        variable="precip",
+        init="2026-05-15",
+        region=[-1, 1, -1, 1],
+        reforecast=True,
+        cache=False,
+        verbose=False,
+    )
+
+    assert "year" in result.dims
+    assert list(result["year"].values) == [2006, 2007, 2008, 2009, 2010]
+    assert "member" in result.dims
+    assert "lead_time" in result.dims
+    assert "lat" in result.dims
+    assert "lon" in result.dims
+
+    # Confirm the request went out as a reforecast.
+    assert len(fake.calls) == 1
+    _, request, _ = fake.calls[0]
+    assert request["forecast_type"] == "reforecast"

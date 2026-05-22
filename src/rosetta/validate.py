@@ -252,12 +252,14 @@ def _fetch_rosetta_da(product, variable, init_month, target, hindcast, region):
 
     da = ds[variable]
 
+    # keep_attrs=True so the `units` attribute set by normalize() survives the
+    # ensemble + lead-time reductions; check_structure["has_units"] reads it.
     if "member" in da.dims:
-        da = da.mean("member")
+        da = da.mean("member", keep_attrs=True)
     if "M" in da.dims:
-        da = da.mean("M")
+        da = da.mean("M", keep_attrs=True)
     if "lead_time" in da.dims:
-        da = da.mean("lead_time")
+        da = da.mean("lead_time", keep_attrs=True)
 
     return da
 
