@@ -113,13 +113,26 @@ def fetch(product, variable, init=None, target=None, region=None,
     # against a silent fall-through to forecast mode in mis-calls.
     config["_reforecast"] = bool(reforecast)
 
+    if reforecast:
+        # ECDS's s2s-reforecasts dataset is broken on the marsth-ecmwf
+        # partition (class=s2 routing issue). Route to the legacy ECMWF
+        # Web API via the MARS adapter instead.
+        config["adapter"] = "mars"
+
     date_range = hindcast
 
     if init:
         init_dt = parse_init(init)
         config["init_months"] = [init_dt.month]
         if date_range is None:
-            date_range = (init_dt.year, init_dt.year)
+            if reforecast:
+                # ECMWF S2S reforecasts span ~20 years of equivalent-week
+                # historical issuances ending the year before the realtime
+                # forecast. Default to that window when the caller doesn't
+                # pin one explicitly.
+                date_range = (init_dt.year - 20, init_dt.year - 1)
+            else:
+                date_range = (init_dt.year, init_dt.year)
 
         # For sub-daily / single-issuance datasets (S2S), thread the original
         # date string through to the adapter so it can build a single-day request.

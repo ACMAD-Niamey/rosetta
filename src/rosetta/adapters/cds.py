@@ -90,18 +90,9 @@ class CDSAdapter(AdapterBase):
             request["year"] = y
             request["month"] = m
             request["day"] = d
-            if product_config.get("_reforecast"):
-                # Reforecast mode: caller wants the on-the-fly reforecast suite
-                # for the same calendar week. The catalog may pin a specific
-                # variant (e.g. "cf_reforecast" for the control reforecast);
-                # default is "reforecast" (perturbed ensemble).
-                request["forecast_type"] = product_config.get(
-                    "reforecast_type", "reforecast"
-                )
-            else:
-                request["forecast_type"] = product_config.get(
-                    "forecast_type", "perturbed_forecast"
-                )
+            request["forecast_type"] = product_config.get(
+                "forecast_type", "perturbed_forecast"
+            )
             request["time"] = product_config.get("forecast_time", "00:00")
             if "cds_model" in product_config:
                 request["origin"] = product_config["cds_model"]
@@ -117,10 +108,8 @@ class CDSAdapter(AdapterBase):
                 lat_s, lat_n, lon_w, lon_e = region
                 request["area"] = [lat_n, lon_w, lat_s, lon_e]
             if verbose:
-                mode = "reforecast" if product_config.get("_reforecast") else "forecast"
                 print(f"[rosetta:cds] s2s request dataset={dataset} "
-                      f"init={init_date} mode={mode} "
-                      f"forecast_type={request['forecast_type']}")
+                      f"init={init_date} forecast_type={request['forecast_type']}")
             tmpdir = get_tmpdir()
             with tempfile.NamedTemporaryFile(
                 suffix=".nc", delete=False, dir=tmpdir

@@ -10,10 +10,13 @@ dependencies = [
     "pyyaml",
     "scipy",
     "cdsapi>=0.7.7",
+    "ecmwf-api-client>=1.6",
     "tqdm",
     "rioxarray",
     "sheerwater>=0.2.5",
     "nuthatch>=0.4.9",
+    "cfgrib>=0.9.15.1",
+    "eccodeslib>=2.46.2.19",
 ]
 
 [project.optional-dependencies]
