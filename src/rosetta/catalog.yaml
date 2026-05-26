@@ -749,6 +749,49 @@ obs/chirps-v2:
     lon_res: 0.05
     temporal: monthly
 
+# CHIRPS dekadal-style (10-day rolling aggregation) via Sheerwater's
+# chirps_v2 function with agg_days=10. Used by the deepscale S2S
+# testbed for per-dekad climatology baselines and verification.
+# Note: this is a 10-day rolling window, not strict calendar dekads
+# (1–10, 11–20, 21–end-of-month). Sufficient for climatology slicing;
+# Plan C's per-dekad verification needs to handle the rolling-window
+# semantics explicitly.
+obs/chirps-dekadal:
+  adapter: sheerwater
+  source: chirps_v2
+  source_kwargs:
+    agg_days: 10
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25
+    temporal: dekadal-rolling
+
+# CHIRPS preliminary live feed via Sheerwater's chirps_raw_live.
+# Daily values (no aggregation parameter — caller must aggregate to
+# dekads downstream). ~8-day lag from the present (vs. ~3-week lag of
+# chirps_v2). Used by the deepscale S2S testbed for recent-obs scoring
+# when the finalized v2 data hasn't caught up yet.
+obs/chirps-live:
+  adapter: sheerwater
+  source: chirps.chirps_raw_live
+  source_kwargs:
+    recompute: true     # actually compute live data (not strict read-from-cache)
+    cache_mode: write   # write the fetched data into the local cache
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.05  # CHIRPS native resolution
+    lon_res: 0.05
+    temporal: daily
+
 c3s/ecmwf-monthly:
   adapter: cds
   cds_dataset: "seasonal-monthly-single-levels"
@@ -812,7 +855,12 @@ c3s/ecmwf-s2s:
     precip:
       native_name: total_precipitation
       short_name: tp
-      units: m
+      # Despite ECMWF docs saying "m", empirical inspection of returned
+      # data (both the CDS NetCDF and the MARS GRIB) shows values are
+      # actually in kg m**-2 (= mm). The (m, mm/day) conversion would
+      # over-scale by 1000x. Declaring mm here makes the after-deaccumulation
+      # 24h-step value pass through identity → mm/day numerically.
+      units: mm
       target_units: "mm/day"
       accumulated: true
     sst:
