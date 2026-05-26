@@ -50,10 +50,35 @@ def test_sheerwater_adapter_passes_region():
     }
     with patch("sheerwater.data.chirps_v3", mock_fn, create=True):
         adapter = SheerwaterAdapter()
-        adapter.fetch_data(entry, "precip", date_range=(2010, 2010), region=[-2, 2, 36, 40])
+        result = adapter.fetch_data(entry, "precip", date_range=(2010, 2010), region=[-2, 2, 36, 40])
     call_kwargs = mock_fn.call_args.kwargs
-    assert "region" in call_kwargs
-    assert call_kwargs["region"] == [-2, 2, 36, 40]
+    # Sheerwater takes a named string region; the adapter translates a
+    # rosetta-style bbox list to a global fetch and crops the result.
+    assert call_kwargs["region"] == "global"
+    # Result was cropped client-side to the bbox.
+    assert float(result["lat"].min()) >= -2.0
+    assert float(result["lat"].max()) <= 2.0
+    assert float(result["lon"].min()) >= 36.0
+    assert float(result["lon"].max()) <= 40.0
+
+
+def test_sheerwater_adapter_passes_string_region_unchanged():
+    """A string region (e.g. 'africa') flows through to sheerwater unchanged."""
+    from rosetta.adapters.sheerwater import SheerwaterAdapter
+    raw = _make_raw_ds("precip")
+    mock_fn = MagicMock(return_value=raw)
+    entry = {
+        "source": "chirps_v3",
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day", "target_units": "mm/day"}
+        },
+        "grid": {"hindcast_range": [2010, 2010]},
+    }
+    with patch("sheerwater.data.chirps_v3", mock_fn, create=True):
+        adapter = SheerwaterAdapter()
+        adapter.fetch_data(entry, "precip", date_range=(2010, 2010), region="africa")
+    call_kwargs = mock_fn.call_args.kwargs
+    assert call_kwargs["region"] == "africa"
 
 
 def test_sheerwater_adapter_passes_source_kwargs():

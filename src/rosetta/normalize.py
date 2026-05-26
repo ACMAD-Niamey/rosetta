@@ -24,6 +24,9 @@ _CONVERSIONS = {
     ("m", "mm/day"): lambda da: da * 1000,
     ("m/s", "mm/day"): lambda da: da * 86_400_000,
     ("mm/month", "mm/day"): lambda da: da / 30.0,
+    # Identity: variable is already accumulated mm; after deaccumulation
+    # (diff over 24h lead_time), each value is mm per 24h = mm/day.
+    ("mm", "mm/day"): lambda da: da,
 }
 
 

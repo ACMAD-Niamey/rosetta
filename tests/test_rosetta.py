@@ -977,20 +977,24 @@ def test_placeholder_entries_exist_and_return_healthy_false():
 def test_fetch_reforecast_kwarg_plumbs_to_adapter(monkeypatch):
     """rosetta.fetch(reforecast=True) sets config['_reforecast']=True on the adapter call."""
     import rosetta
-    from rosetta.adapters.cds import CDSAdapter
+    from rosetta.adapters.mars import MARSAdapter
 
     captured = {}
 
     def fake_fetch_data(self, config, variable, date_range=None, region=None):
         captured["reforecast"] = config.get("_reforecast", False)
         # Return a tiny well-formed dataset so the rest of fetch() succeeds.
-        import xarray as xr, numpy as np
+        import xarray as xr, numpy as np, pandas as pd
+        hdates = pd.to_datetime(["2020-05-15"])
         return xr.Dataset(
-            {"tp": (["latitude", "longitude"], np.zeros((2, 2), dtype="float32"))},
-            coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+            {"tp": (["hdate", "number", "step", "latitude", "longitude"],
+                    np.zeros((1, 2, 3, 2, 2), dtype="float32"))},
+            coords={"hdate": hdates, "number": [0, 1],
+                    "step": pd.to_timedelta([24, 48, 72], unit="h"),
+                    "latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
         )
 
-    monkeypatch.setattr(CDSAdapter, "fetch_data", fake_fetch_data)
+    monkeypatch.setattr(MARSAdapter, "fetch_data", fake_fetch_data)
 
     rosetta.fetch(
         product="c3s/ecmwf-s2s",
@@ -1032,3 +1036,50 @@ def test_fetch_reforecast_defaults_false(monkeypatch):
     )
 
     assert captured["reforecast"] is False
+
+
+def test_fetch_reforecast_dispatches_to_mars_adapter(monkeypatch):
+    """rosetta.fetch(reforecast=True) routes through MARSAdapter, not CDSAdapter."""
+    import rosetta
+    from rosetta.adapters.cds import CDSAdapter
+    from rosetta.adapters.mars import MARSAdapter
+
+    cds_calls = []
+    mars_calls = []
+
+    def fake_cds_fetch(self, config, variable, date_range=None, region=None):
+        cds_calls.append(dict(config))
+        import xarray as xr, numpy as np
+        return xr.Dataset(
+            {"tp": (["latitude", "longitude"], np.zeros((2, 2), dtype="float32"))},
+            coords={"latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+        )
+
+    def fake_mars_fetch(self, config, variable, date_range=None, region=None):
+        mars_calls.append(dict(config))
+        import xarray as xr, numpy as np, pandas as pd
+        hdates = pd.to_datetime(["2020-05-15", "2021-05-15"])
+        return xr.Dataset(
+            {"tp": (["hdate", "number", "step", "latitude", "longitude"],
+                    np.zeros((2, 2, 3, 2, 2), dtype="float32"))},
+            coords={"hdate": hdates, "number": [0, 1],
+                    "step": pd.to_timedelta([24, 48, 72], unit="h"),
+                    "latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
+        )
+
+    monkeypatch.setattr(CDSAdapter, "fetch_data", fake_cds_fetch)
+    monkeypatch.setattr(MARSAdapter, "fetch_data", fake_mars_fetch)
+
+    rosetta.fetch(
+        product="c3s/ecmwf-s2s",
+        variable="precip",
+        init="2026-05-15",
+        region=[-2, 2, 36, 40],
+        reforecast=True,
+        hindcast=(2020, 2021),
+        cache=False,
+        verbose=False,
+    )
+
+    assert len(mars_calls) == 1
+    assert len(cds_calls) == 0
