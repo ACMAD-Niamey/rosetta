@@ -7,7 +7,7 @@ from .normalize import normalize
 
 from .storage import save
 
-_CACHE_VERSION = 4  # bump when adapter logic or normalization changes
+_CACHE_VERSION = 5  # bump when adapter logic or normalization changes
 
 
 def _fetch_raw(product: str, variable: str, config: dict,
@@ -113,11 +113,10 @@ def fetch(product, variable, init=None, target=None, region=None,
     # against a silent fall-through to forecast mode in mis-calls.
     config["_reforecast"] = bool(reforecast)
 
-    if reforecast:
-        # ECDS's s2s-reforecasts dataset is broken on the marsth-ecmwf
-        # partition (class=s2 routing issue). Route to the legacy ECMWF
-        # Web API via the MARS adapter instead.
-        config["adapter"] = "mars"
+    # Reforecast dispatch: the CDS adapter switches its collection name to
+    # `s2s-reforecasts` based on `_reforecast` (set above). The legacy MARS
+    # path is retained for emergencies but no longer the default — ECMWF
+    # has decommissioned legacy WEB-API access to the S2S dataset.
 
     date_range = hindcast
 

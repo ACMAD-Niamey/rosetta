@@ -109,57 +109,10 @@ def test_mars_adapter_requires_date_range(monkeypatch):
         adapter.fetch_data(config, "precip", date_range=None, region=[-2, 2, 36, 40])
 
 
-def test_fetch_reforecast_end_to_end_via_mars(monkeypatch, tmp_path):
-    """rosetta.fetch(reforecast=True) returns a normalized (year, member, lead_time, lat, lon) Dataset."""
-    import rosetta
-    import xarray as xr
-    import numpy as np
-    import pandas as pd
-
-    class _FakeServer:
-        def __init__(self, *a, **kw):
-            self.calls = []
-
-        def retrieve(self, req):
-            self.calls.append(dict(req))
-            target = req["target"]
-            hdates = pd.to_datetime(["2020-05-15", "2021-05-15"])
-            ds = xr.Dataset(
-                {"tp": (["hdate", "number", "step", "latitude", "longitude"],
-                        np.zeros((2, 2, 3, 2, 2), dtype="float32"))},
-                coords={"hdate": hdates, "number": [0, 1],
-                        "step": pd.to_timedelta([24, 48, 72], unit="h"),
-                        "latitude": [0.0, 1.0], "longitude": [0.0, 1.0]},
-            )
-            ds.to_netcdf(target)
-
-    fake = _FakeServer()
-    monkeypatch.setattr("ecmwfapi.ECMWFDataServer", lambda *a, **kw: fake)
-    monkeypatch.setattr(
-        "rosetta.adapters.mars._open_downloaded",
-        lambda path: xr.open_dataset(path, decode_times=False),
-    )
-
-    result = rosetta.fetch(
-        product="c3s/ecmwf-s2s",
-        variable="precip",
-        init="2026-05-15",
-        region=[-2, 2, 36, 40],
-        reforecast=True,
-        hindcast=(2020, 2021),
-        cache=False,
-        verbose=False,
-    )
-
-    assert "year" in result.dims
-    assert list(result["year"].values) == [2020, 2021]
-    assert "member" in result.dims
-    assert "lead_time" in result.dims
-    assert "lat" in result.dims
-    assert "lon" in result.dims
-
-    assert len(fake.calls) == 1
-    req = fake.calls[0]
-    assert req["stream"] == "enfh"
-    assert req["type"] == "pf"
-    assert req["hdate"] == "2020-05-15/2021-05-15"
+# `test_fetch_reforecast_end_to_end_via_mars` deleted 2026-05-27: ECMWF
+# decommissioned legacy WEB-API access to the S2S dataset, so
+# `rosetta.fetch(reforecast=True)` no longer routes through MARSAdapter — it
+# now goes to ECDS's `s2s-reforecasts` collection via the CDS adapter. The
+# CDS-side equivalent end-to-end test lives in test_rosetta.py
+# (test_fetch_reforecast_dispatches_to_cds_adapter). MARSAdapter is still
+# unit-tested above (build, validation) for the day we need it back.

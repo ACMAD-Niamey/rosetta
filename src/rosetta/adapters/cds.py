@@ -64,6 +64,13 @@ class CDSAdapter(AdapterBase):
         client = cdsapi.Client(**client_kwargs)
         var_cfg = product_config["variables"][variable]
         dataset = product_config["cds_dataset"]
+        # Reforecast mode: ECDS exposes the on-the-fly hindcast suite as a
+        # separate collection (`s2s-reforecasts`, plural). The realtime
+        # `s2s-forecasts` collection's `forecast_type=reforecast` option is
+        # broken upstream (MARS routing error class=s2 ambiguous). Switching
+        # the collection routes through ECDS's working reforecast pipeline.
+        if product_config.get("_reforecast") and dataset == "s2s-forecasts":
+            dataset = "s2s-reforecasts"
 
         request = {
             "variable": var_cfg["native_name"],
@@ -71,7 +78,7 @@ class CDSAdapter(AdapterBase):
             "download_format": "unarchived",
         }
 
-        if dataset == "s2s-forecasts":
+        if dataset in ("s2s-forecasts", "s2s-reforecasts"):
             # Sub-seasonal forecasts have a different request shape than the
             # seasonal datasets handled below: single-day issuance, forecast_type
             # selector, Mars-style leadtime range, `origin` not `originating_centre`.
@@ -90,9 +97,17 @@ class CDSAdapter(AdapterBase):
             request["year"] = y
             request["month"] = m
             request["day"] = d
-            request["forecast_type"] = product_config.get(
-                "forecast_type", "perturbed_forecast"
-            )
+            if dataset == "s2s-reforecasts":
+                # Reforecast collection uses a different forecast_type vocabulary;
+                # `perturbed_reforecast` returns the 10-member ensemble we need
+                # for BCSD/CCA/rank-analog training. Catalog can override.
+                request["forecast_type"] = product_config.get(
+                    "reforecast_type", "perturbed_reforecast"
+                )
+            else:
+                request["forecast_type"] = product_config.get(
+                    "forecast_type", "perturbed_forecast"
+                )
             request["time"] = product_config.get("forecast_time", "00:00")
             if "cds_model" in product_config:
                 request["origin"] = product_config["cds_model"]
@@ -145,6 +160,13 @@ class CDSAdapter(AdapterBase):
                 else:
                     with xr.open_dataset(download_path, decode_timedelta=False) as opened:
                         ds = opened.load()
+                # ECDS reforecasts label the historical-issuance axis as `time`
+                # (datetime64 values, one per hindcast year). Rename to `hdate`
+                # so the normalize layer's existing `hdate → year` transform
+                # converts to integer years, and so `valid_time → time` can
+                # rename downstream without colliding.
+                if dataset == "s2s-reforecasts" and "time" in ds.dims:
+                    ds = ds.rename({"time": "hdate"})
                 return ds
             finally:
                 try:
