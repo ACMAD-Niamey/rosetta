@@ -9,11 +9,34 @@ Caching note: Sheerwater is already Nuthatch-cached upstream. Do NOT apply
 @nuthatch.cache() here — that would double-store the same data.
 """
 import importlib
+import logging
 from datetime import date
 
 import xarray as xr
 
 from .base import AdapterBase
+
+
+class _GcsfsBucketTypeFilter(logging.Filter):
+    """Suppress gcsfs's 'Could not determine bucket type' warning.
+
+    gcsfs's storage-control API call to detect bucket type (hierarchical vs
+    zonal) fails for unauthenticated reads of public buckets (e.g.
+    sheerwater-public-datalake). It falls back to UNKNOWN + standard
+    GCSFileSystem, which works fine for anonymous reads — but the warning
+    fires once per chunk read, flooding CI logs heavily enough to trigger
+    GitHub Actions runner cancellation. The fallback is correct; the
+    warning is benign; silencing it is the right move.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Could not determine bucket type" not in record.getMessage()
+
+
+# Installed at module import so any code path that ends up using gcsfs via
+# sheerwater (including xarray's lazy chunk reads downstream of the adapter)
+# benefits. Filters are deduplicated by identity, so re-imports are safe.
+logging.getLogger("gcsfs").addFilter(_GcsfsBucketTypeFilter())
 
 
 def _to_time_range(date_range: tuple[int, int] | None) -> tuple[str, str]:
