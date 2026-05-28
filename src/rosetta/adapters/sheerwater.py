@@ -90,28 +90,14 @@ class SheerwaterAdapter(AdapterBase):
             **source_kwargs,
         )
 
-        # Size-aware crop strategy.
-        #
-        # Big datasets (e.g. obs/chirps-dekadal, ~45 GB lazy over
-        # 1991-2020): an eager .compute() before crop OOMs any CI runner
-        # with bounded memory. We crop *before* compute so only the bbox
-        # slab materializes — sheerwater's masking is part of the lazy
-        # graph and still gets applied via chirps_v2 / _chirps_unified.
-        #
-        # Small datasets (e.g. obs/chirps-live, ~250 MB): eager-then-crop
-        # is required. Empirically the lazy-crop path on chirps_raw_live
-        # leaves raw CHIRPS -9999 no-data sentinels unmasked (mean comes
-        # back hugely negative). The eager .compute() triggers something
-        # in sheerwater's pipeline (likely the @dask_remote decorator's
-        # post-compute hook, or an implicit mask application) that
-        # converts the sentinels to NaN. Until we root-cause that, the
-        # eager path is the safe one for live data — and it fits in
-        # memory because the dataset is small.
-        #
-        # TODO(rosetta#32): always-lazy is the cleaner design. Diagnose
-        # exactly which sheerwater step the eager .compute() triggers for
-        # chirps_raw_live so we can apply it explicitly in our adapter
-        # and drop the size split.
+        # Crop spatially *before* materializing. Sheerwater's region= can
+        # only be a small set of named strings (e.g. 'global'), so for
+        # country bboxes we fetch global lazily and crop client-side.
+        # Lazy crop means only the bbox slab is loaded — for
+        # obs/chirps-dekadal that's the difference between ~45 GB and a
+        # few hundred MB. No-data sentinels from sources like
+        # chirps_raw_live are converted to NaN downstream in normalize
+        # via the variable's `fill_value` catalog directive.
         if bbox is not None:
             lat_s, lat_n, lon_w, lon_e = bbox
             lat_name = "lat" if "lat" in ds.dims else "latitude"
@@ -123,20 +109,10 @@ class SheerwaterAdapter(AdapterBase):
                 lat_slice = slice(lat_n, lat_s)
             else:
                 lat_slice = slice(lat_s, lat_n)
-            crop = {lat_name: lat_slice, lon_name: slice(lon_w, lon_e)}
+            ds = ds.sel({lat_name: lat_slice, lon_name: slice(lon_w, lon_e)})
 
-            lazy_bytes = getattr(ds, "nbytes", 0)
-            if lazy_bytes > 1_000_000_000:
-                ds = ds.sel(crop)
-                if hasattr(ds, "compute"):
-                    ds = ds.compute()
-            else:
-                if hasattr(ds, "compute"):
-                    ds = ds.compute()
-                ds = ds.sel(crop)
-        else:
-            if hasattr(ds, "compute"):
-                ds = ds.compute()
+        if hasattr(ds, "compute"):
+            ds = ds.compute()
 
         return ds
 
