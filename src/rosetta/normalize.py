@@ -119,6 +119,15 @@ def normalize(ds, product_config, variable, region=None):
 
     ds[variable].attrs["units"] = tgt
 
+    # Optional no-data sentinel masking. Some upstream sources (e.g.
+    # CHIRPS via sheerwater's chirps_raw_live) return a numeric sentinel
+    # (typically -9999) for ocean/missing cells instead of NaN. Catalog
+    # can specify `fill_value` per variable to convert those to NaN so
+    # downstream aggregations skip them correctly.
+    fill_value = var_cfg.get("fill_value")
+    if fill_value is not None:
+        ds[variable] = ds[variable].where(ds[variable] != fill_value)
+
     if "lat" in ds.dims:
         ds = ds.sortby("lat")
 

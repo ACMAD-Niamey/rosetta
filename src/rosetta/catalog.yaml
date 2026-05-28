@@ -787,6 +787,11 @@ obs/chirps-live:
       native_name: precip
       units: "mm/day"
       target_units: "mm/day"
+      # Raw CHIRPS uses -9999 as the ocean / missing-data sentinel. The
+      # chirps_raw_live path doesn't apply sheerwater's land-sea mask, so
+      # the sentinel reaches us literally. normalize converts it to NaN
+      # so downstream aggregations skip ocean cells correctly.
+      fill_value: -9999
   grid:
     lat_res: 0.05  # CHIRPS native resolution
     lon_res: 0.05

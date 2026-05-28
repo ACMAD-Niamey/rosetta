@@ -122,6 +122,60 @@ def test_normalize_no_change_same_units():
     np.testing.assert_allclose(result["precip"].values.mean(), 5.0)
 
 
+def test_normalize_masks_fill_value():
+    """Catalog `fill_value` converts sentinel values to NaN after unit
+    conversion. Mirrors the chirps_raw_live case where -9999 marks ocean
+    cells and we don't want it polluting downstream means."""
+    from rosetta.normalize import normalize
+    lat = np.arange(-5, 5, 1.0)
+    lon = np.arange(30, 40, 1.0)
+    vals = np.full((10, 10), 5.0)
+    vals[0, 0] = -9999.0     # sentinel
+    vals[1, 1] = -9999.0     # sentinel
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"], vals)},
+        coords={"lat": lat, "lon": lon},
+    )
+    config = {
+        "variables": {
+            "precip": {
+                "native_name": "precip",
+                "units": "mm/day",
+                "target_units": "mm/day",
+                "fill_value": -9999,
+            }
+        }
+    }
+    result = normalize(ds, config, "precip")
+    # Sentinels become NaN; real values pass through unchanged.
+    assert np.isnan(result["precip"].values[0, 0])
+    assert np.isnan(result["precip"].values[1, 1])
+    np.testing.assert_allclose(result["precip"].values[2, 2], 5.0)
+    # Nanmean skips sentinels, matches the real-value mean.
+    np.testing.assert_allclose(np.nanmean(result["precip"].values), 5.0)
+
+
+def test_normalize_no_fill_value_is_no_op():
+    """Variables without `fill_value` in the catalog leave data untouched."""
+    from rosetta.normalize import normalize
+    lat = np.arange(-5, 5, 1.0)
+    lon = np.arange(30, 40, 1.0)
+    vals = np.full((10, 10), 5.0)
+    vals[0, 0] = -9999.0
+    ds = xr.Dataset(
+        {"precip": (["lat", "lon"], vals)},
+        coords={"lat": lat, "lon": lon},
+    )
+    config = {
+        "variables": {
+            "precip": {"native_name": "precip", "units": "mm/day", "target_units": "mm/day"}
+        }
+    }
+    result = normalize(ds, config, "precip")
+    # -9999 remains because no fill_value was declared
+    assert result["precip"].values[0, 0] == -9999.0
+
+
 def test_normalize_subsets_region(synthetic_global_ds):
     from rosetta.normalize import normalize
     config = {
