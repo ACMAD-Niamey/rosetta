@@ -90,28 +90,53 @@ class SheerwaterAdapter(AdapterBase):
             **source_kwargs,
         )
 
-        # Sheerwater returns a lazy dask graph that includes the agg_days
-        # rolling. Cropping a lazy graph before computing can leave chunks
-        # smaller than the rolling window, which dask refuses with
-        # "depth N > chunk 0". Force eager evaluation BEFORE cropping so
-        # the rolling executes on the full global grid in one shot, then
-        # we slice the materialized result. For obs/chirps-dekadal this
-        # is ~30y × 721 × 1440 × 4B ≈ 1.5GB — manageable on dev machines.
-        if hasattr(ds, "compute"):
-            ds = ds.compute()
-
+        # Size-aware crop strategy.
+        #
+        # Big datasets (e.g. obs/chirps-dekadal, ~45 GB lazy over
+        # 1991-2020): an eager .compute() before crop OOMs any CI runner
+        # with bounded memory. We crop *before* compute so only the bbox
+        # slab materializes — sheerwater's masking is part of the lazy
+        # graph and still gets applied via chirps_v2 / _chirps_unified.
+        #
+        # Small datasets (e.g. obs/chirps-live, ~250 MB): eager-then-crop
+        # is required. Empirically the lazy-crop path on chirps_raw_live
+        # leaves raw CHIRPS -9999 no-data sentinels unmasked (mean comes
+        # back hugely negative). The eager .compute() triggers something
+        # in sheerwater's pipeline (likely the @dask_remote decorator's
+        # post-compute hook, or an implicit mask application) that
+        # converts the sentinels to NaN. Until we root-cause that, the
+        # eager path is the safe one for live data — and it fits in
+        # memory because the dataset is small.
+        #
+        # TODO(rosetta#32): always-lazy is the cleaner design. Diagnose
+        # exactly which sheerwater step the eager .compute() triggers for
+        # chirps_raw_live so we can apply it explicitly in our adapter
+        # and drop the size split.
         if bbox is not None:
             lat_s, lat_n, lon_w, lon_e = bbox
             lat_name = "lat" if "lat" in ds.dims else "latitude"
             lon_name = "lon" if "lon" in ds.dims else "longitude"
-            # Some sheerwater grids have descending lat; build the slice in
-            # the dataset's native order so .sel() returns a non-empty subset.
+            # `.values` on a coord triggers a tiny coord-only load, not
+            # the full data; safe even when the dataset is lazy.
             lat_vals = ds[lat_name].values
             if lat_vals[0] > lat_vals[-1]:
                 lat_slice = slice(lat_n, lat_s)
             else:
                 lat_slice = slice(lat_s, lat_n)
-            ds = ds.sel({lat_name: lat_slice, lon_name: slice(lon_w, lon_e)})
+            crop = {lat_name: lat_slice, lon_name: slice(lon_w, lon_e)}
+
+            lazy_bytes = getattr(ds, "nbytes", 0)
+            if lazy_bytes > 1_000_000_000:
+                ds = ds.sel(crop)
+                if hasattr(ds, "compute"):
+                    ds = ds.compute()
+            else:
+                if hasattr(ds, "compute"):
+                    ds = ds.compute()
+                ds = ds.sel(crop)
+        else:
+            if hasattr(ds, "compute"):
+                ds = ds.compute()
 
         return ds
 
