@@ -23,6 +23,10 @@ dependencies = [
 s3 = ["boto3"]
 dev = ["pytest"]
 demo = ["matplotlib", "cartopy", "rasterio"]
+# Shapefile / geometry region input (rosetta.fetch(region="x.shp")). rioxarray
+# is already a core dep and rasterio rides in with it; geopandas is the only
+# genuinely new requirement, kept optional because its stack is heavy.
+geo = ["geopandas", "rasterio"]
 
 [project.scripts]
 rosetta = "rosetta.cli:cli"

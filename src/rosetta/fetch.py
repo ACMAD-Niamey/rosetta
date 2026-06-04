@@ -4,6 +4,7 @@ from nuthatch import cache
 from . import catalog
 from .adapters import get_adapter
 from .normalize import normalize
+from .region import resolve_region
 
 from .storage import save
 
@@ -72,8 +73,27 @@ def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
-          reforecast=False):
+          reforecast=False, boundary="center", region_buffer=1.5):
     """Fetch, normalize, and optionally save climate data.
+
+    region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
+    shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
+    the bounding box drives upstream slicing and the result is masked to the
+    true polygon (cells outside it become NaN). Shapefile/geometry support
+    needs the `geo` extra: pip install 'rosetta[geo]'.
+
+    boundary selects which grid cells count as inside the region, for both bbox
+    and shapefile/geometry inputs:
+      "center" (default): keep a cell only if its centre lies inside the region
+        — the xarray/CDO/rasterio convention, and unbiased for area means.
+      "cover": keep every cell the region touches, so it's covered to its true
+        edges (matches rasterio's all_touched=True). Best for display/masking
+        and small or coarse-grid regions.
+
+    region_buffer (degrees, default 1.5): only used when boundary="cover". How
+    far to pad the fetched bbox so boundary cells aren't clipped off before the
+    region is covered. Must exceed half the grid spacing (1.5° covers grids up
+    to ~3°); raise it for coarser products.
 
     cache=True (default): results are cached locally via nuthatch.
     cache=False: bypass the cache and fetch fresh from the source.
@@ -174,18 +194,52 @@ def fetch(product, variable, init=None, target=None, region=None,
             config["target_lead_months"] = lead_months
             config["target_range"] = target_range
 
+    # Resolve the region once: adapters and the cache key see only the bbox
+    # (stable, hashable); the optional polygon geometry is applied as the final
+    # mask in normalize(). Shapefiles/geometries thus never reach the adapter or
+    # the cache args — two requests with the same bbox share cached raw data.
+    bbox, geometry = resolve_region(region)
+    cover = boundary == "cover"
+
+    # In "cover" mode, pad the fetched bbox by region_buffer degrees so the grid
+    # extends past the region's edges. The bbox slice is centre-based, so without
+    # this the boundary cells (centre just outside the bounds, but extent still
+    # covering a sliver of the region) get dropped, leaving edges empty.
+    # normalize() then trims back to the region. The default "center" mode keeps
+    # only centre-in cells, which are within the bounds, so no padding is needed.
+    fetch_bbox = bbox
+    if cover and bbox is not None:
+        b = region_buffer
+        fetch_bbox = [max(-90.0, bbox[0] - b), min(90.0, bbox[1] + b),
+                      bbox[2] - b, bbox[3] + b]
+
     _log(verbose, f"downloading via adapter={config['adapter']}")
     if cache:
         raw = _fetch_raw_cached(
-            product, variable, config, date_range, region,
+            product, variable, config, date_range, fetch_bbox,
             init_months=tuple(config.get("init_months", [])),
             init_date=config.get("_init_date"),
         )
     else:
         raw = get_adapter(config["adapter"]).fetch_data(
-            config, variable, date_range=date_range, region=region)
+            config, variable, date_range=date_range, region=fetch_bbox)
     _log(verbose, "normalizing dataset")
-    clean = normalize(raw, config, variable, region)
+    # normalize gets the original (unpadded) bbox: in cover mode it expands by
+    # half a cell to cover it; in center mode it slices to it exactly.
+    clean = normalize(raw, config, variable, bbox, geometry=geometry,
+                      boundary=boundary)
+
+    # A region was requested but the source isn't spatially griddable (e.g.
+    # station/tabular data has no lat/lon grid): fail loudly rather than
+    # silently handing back the full, unsubset dataset.
+    if region is not None and ("lat" not in clean.dims or "lon" not in clean.dims):
+        raise ValueError(
+            f"region was requested for product {product!r} (adapter "
+            f"{config['adapter']!r}), but its data has no lat/lon grid, so it "
+            f"can't be subset to a bounding box or shapefile. Non-gridded "
+            f"sources (e.g. station/tabular observations) don't support spatial "
+            f"region selection — drop `region`, or use a gridded product."
+        )
 
     if destination:
         _log(verbose, f"saving output -> {destination}")

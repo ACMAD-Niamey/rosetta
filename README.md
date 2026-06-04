@@ -67,6 +67,50 @@ All datasets are returned with canonical coordinate names regardless of the upst
 
 Numeric time encodings (e.g. "months since 1960-01-01") are automatically decoded to `datetime64`.
 
+### Region input
+
+`region` accepts three forms:
+
+| Form | Example | Behaviour |
+|------|---------|-----------|
+| bbox | `region=[-12, 6, 28, 42]` | `[lat_s, lat_n, lon_w, lon_e]` |
+| shapefile | `region="kenya.shp"` | bounding box slices upstream; result masked to the polygon |
+| geometry | `region=gdf.geometry` | shapely geometry / geopandas `GeoSeries`, same masking |
+
+Shapefile and geometry inputs need the `geo` extra (`pip install 'rosetta[geo]'`).
+The polygon is reprojected to EPSG:4326 and dissolved, so multi-feature files
+(e.g. an archipelago) clip correctly. Cells outside the polygon come back as `NaN`.
+
+```python
+import rosetta
+
+# Clip to a country boundary — values outside Kenya become NaN.
+ds = rosetta.fetch(
+    product="nmme/cfsv2",
+    variable="precip",
+    init="2025-02",
+    target="MAM",
+    region="kenya.shp",
+    hindcast=(1993, 2016),
+)
+```
+
+**Boundary rule.** By default a grid cell is included only if its **centre**
+lies inside the region (`boundary="center"` — the xarray/CDO/rasterio
+convention, and unbiased for area means). Pass `boundary="cover"` to keep every
+cell the region *touches*, so it's covered to its true edges (matches rasterio's
+`all_touched=True`) — useful for display/masking and coarse grids, where
+center-based selection can drop a country's thin tips. Applies to bbox and
+shapefile/geometry inputs alike.
+
+```python
+ds = rosetta.fetch(..., region="kenya.shp", boundary="cover")
+```
+
+> **Note:** polygons that cross the ±180° antimeridian are not yet handled — the
+> derived bounding box spans the full longitude range. Split such geometries at
+> the antimeridian before passing them in.
+
 ## Dual-domain usage (SST + PRCP predictors)
 
 PyCPT's seasonal forecasting workflow uses two predictor domains per GCM: a large SST domain and a regional precipitation domain. Rosetta supports this with orthogonal `fetch()` calls — one per domain.
