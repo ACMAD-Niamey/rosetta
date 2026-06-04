@@ -165,8 +165,12 @@ def test_fetch_nmme_gemnemo_temp():
 @pytest.mark.integration
 @pytest.mark.network
 def test_fetch_chirps_precip():
+    # obs/chirps now defaults to the Sheerwater-backed entry (rosetta #7); the
+    # direct UCSB COG/http path this network test was written for lives at
+    # obs/chirps-direct. The Sheerwater routing is covered (mocked) by
+    # tests/test_sheerwater_catalog.py::test_fetch_obs_chirps_through_sheerwater.
     ds = rosetta.fetch(
-        product="obs/chirps",
+        product="obs/chirps-direct",
         variable="precip",
         region=REGION,
         verbose=True,

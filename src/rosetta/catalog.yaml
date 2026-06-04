@@ -218,7 +218,11 @@ nmme/geoss2s-hindcast:
     members: 10
     hindcast_range: [1982, 2020]
 
-# NCEI NMME archive (2018+ only, no hindcasts)
+# NCEI NMME archive — ccsm4 / geoss2s / gemnemo (2018+ only, no hindcasts).
+# PROVENANCE: archive. NOAA NCEI re-hosts NMME output; it is an archive, not the
+# producing center (NCAR/COLA, NASA-GMAO, ECCC). Used because these older models
+# have no convenient live producing-center feed. Same provenance class as the
+# CCSR entries below; see the SPEAR block for the original-vs-mirror rationale.
 # https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/
 
 nmme/ccsm4:
@@ -296,6 +300,12 @@ nmme/gemnemo:
     members: 10
     hindcast_range: null
 
+# --- c3s/* : Copernicus Climate Data Store (CDS) seasonal systems ---
+# PROVENANCE: original. The CDS is the official distribution channel for these
+# centres' seasonal forecasts (ECMWF/SEAS5, CMCC, DWD, Météo-France, UKMO, JMA,
+# ECCC), so these are original-source entries — rosetta's preferred kind. (Note
+# some models also appear under nmme/* as the NMME-program copy; e.g. CanSIPS is
+# here as c3s/eccc-cansips* and under nmme/cansipsic4 via the CCSR aggregator.)
 c3s/ecmwf:
   adapter: cds
   cds_dataset: "seasonal-original-single-levels"
@@ -717,8 +727,33 @@ c3s/ukmo-daily:
     members: 7
     hindcast_range: [1993, 2016]
 
+# Default CHIRPS: Sheerwater-backed (public Zarr, 0.25°, land-sea masked).
+# The direct UCSB COG path (0.05°) is preserved as obs/chirps-direct below.
+# §3.2 strategy (a): make the Sheerwater entry the default `obs/chirps`,
+# keep the direct entry available but deprecated.
 obs/chirps:
+  adapter: sheerwater
+  source: chirps_v3
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25
+    members: null
+    hindcast_range: [1981, 2024]
+    temporal: monthly
+  notes: "Default CHIRPS. Sheerwater chirps_v3 (public GCS Zarr, 0.25°). Direct UCSB COG (0.05°) at obs/chirps-direct."
+
+# Direct UCSB COG CHIRPS v3 (0.05°). Superseded by the Sheerwater-backed
+# obs/chirps above; kept for users who need the native 0.05° resolution or
+# want to avoid the Sheerwater dependency.
+obs/chirps-direct:
   adapter: http
+  deprecated_after: "2026-06-01"
+  successor: obs/chirps
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/"
   file_pattern: "chirps-v3.0.{year}.{month:02d}.cog"
   format: cog
@@ -770,6 +805,45 @@ obs/chirps-dekadal:
     lat_res: 0.25
     lon_res: 0.25
     temporal: dekadal-rolling
+
+# GPM IMERG Final precipitation via Sheerwater's imerg_final (public Zarr,
+# 0.25°, land-sea masked). Satellite precip; complements CHIRPS, esp. where
+# gauge coverage is thin. Precip only (the Sheerwater adapter calls the
+# function's default variable; temp/other vars would need adapter threading).
+obs/imerg:
+  adapter: sheerwater
+  source: imerg_final
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25
+    members: null
+    hindcast_range: [2000, 2024]
+    temporal: monthly
+  notes: "GPM IMERG Final. Sheerwater-backed (public GCS Zarr, 0.25°)."
+
+# GHCN gauge-based precipitation via Sheerwater's ghcn_avg (gridded station
+# average, public Zarr, 0.25°). Precip only for now (temp via Sheerwater needs
+# the adapter to thread the `variable` arg — tracked as a follow-up).
+obs/ghcn:
+  adapter: sheerwater
+  source: ghcn_avg
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25
+    members: null
+    hindcast_range: [1981, 2024]
+    temporal: monthly
+  notes: "GHCN gauge average. Sheerwater-backed (public GCS Zarr, 0.25°). Precip only."
 
 # CHIRPS preliminary live feed via Sheerwater's chirps_raw_live.
 # Daily values (no aggregation parameter — caller must aggregate to
@@ -883,31 +957,60 @@ obs/era5:
   adapter: cds
   cds_dataset: "reanalysis-era5-single-levels-monthly-means"
   product_type: "monthly_averaged_reanalysis"
+  # Single-level ERA5 monthly means. precip + sst added (§7 / Decision 5b) so
+  # ERA5 is broadly usable, not temp-only. Pressure-level fields (z500, u850,
+  # v850) live in a different CDS dataset and would be a separate
+  # obs/era5-pressure entry (follow-up) — they are not in single-levels.
   variables:
     temp:
       native_name: 2m_temperature
       short_name: t2m
       units: K
       target_units: C
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+    sst:
+      native_name: sea_surface_temperature
+      short_name: sst
+      units: K
+      target_units: C
   grid:
     lat_res: 0.25
     lon_res: 0.25
 
-# GFDL SPEAR (precipitation) — pending source URL
-# Source: GFDL THREDDS or NOAA NODD (path TBD)
-# See: https://github.com/accord-research/rosetta/issues/1
+# GFDL SPEAR / SPEARb (precip, temp, SST) via the Columbia CCSR successor (#14).
+#
+# PROVENANCE: mirror. CCSR (forecast.ccsr.columbia.edu) is an *aggregator* — the
+# IRI Data Library replacement — not the producing center. Rosetta prefers
+# original sources, so strictly the original here is GFDL (NOAA Open Data
+# Dissemination / GFDL THREDDS); if/when that adapter is built it should live
+# under its own channel, e.g. `gfdl/spear`, and this entry stays as the NMME-
+# program copy. CCSR is used because it is clean, standard OPeNDAP with NO
+# coupling to the old PyCPT-DL / IRI Ingrid stack (the CCSR adapter opens it
+# with stock xarray). The `nmme/` prefix denotes the NMME aggregated
+# distribution, which CCSR now is — so this naming is correct as-is.
+#
+# Adapter notes: plain-DAP URLs; the CCSR adapter decodes the "hours since 1960"
+# init axis and uses the self-describing target[S,L] variable for season
+# selection. Native CCSR variable names: prcp / t2m / sst. SPEARb SST is served
+# as SPEAR/sst (no separate SPEARb directory at CCSR).
 nmme/spear:
-  adapter: opendap
-  pending_url: true
-  pending_url_note: "Pending: GFDL SPEAR OPeNDAP source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
-  source_url: null
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/forecast"
   variables:
     precip:
-      native_name: prec
-      units: "mm/day"
-      target_units: "mm/day"
+      native_name: prcp
+      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
+      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
+      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
+      # scale-invariant, so this does not affect §8; the label is just honest.
+      units: "mm"
+      target_units: "mm"
     temp:
-      native_name: tref
+      native_name: t2m
       units: K
       target_units: C
     sst:
@@ -917,21 +1020,23 @@ nmme/spear:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
+    members: 15
     hindcast_range: [1991, 2020]
 
 nmme/spear-hindcast:
-  adapter: opendap
-  pending_url: true
-  pending_url_note: "Pending: GFDL SPEAR hindcast source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
-  source_url: null
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/hindcast"
   variables:
     precip:
-      native_name: prec
-      units: "mm/day"
-      target_units: "mm/day"
+      native_name: prcp
+      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
+      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
+      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
+      # scale-invariant, so this does not affect §8; the label is just honest.
+      units: "mm"
+      target_units: "mm"
     temp:
-      native_name: tref
+      native_name: t2m
       units: K
       target_units: C
     sst:
@@ -941,16 +1046,15 @@ nmme/spear-hindcast:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
+    members: 15
     hindcast_range: [1991, 2020]
 
-# GFDL SPEARb (sea surface temperature) — pending source URL
-# PyCPT uses SPEARb specifically for the SST predictor track
+# SPEARb (SST predictor track). At CCSR the SST is served as SPEAR/sst (there is
+# no separate SPEARb directory); kept as a distinct product name for PyCPT
+# parity (PyCPT uses SPEARb.SST).
 nmme/spearb:
-  adapter: opendap
-  pending_url: true
-  pending_url_note: "Pending: GFDL SPEARb source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
-  source_url: null
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/forecast"
   variables:
     sst:
       native_name: sst
@@ -959,14 +1063,12 @@ nmme/spearb:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
+    members: 15
     hindcast_range: [1991, 2020]
 
 nmme/spearb-hindcast:
-  adapter: opendap
-  pending_url: true
-  pending_url_note: "Pending: GFDL SPEARb hindcast source URL not yet confirmed. Track https://github.com/accord-research/rosetta/issues/1"
-  source_url: null
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/hindcast"
   variables:
     sst:
       native_name: sst
@@ -975,53 +1077,59 @@ nmme/spearb-hindcast:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
+    members: 15
     hindcast_range: [1991, 2020]
 
-# CanSIPS-IC4 — pending GRIB2 adapter
-# Source: ECCC MSC Datamart https://dd.meteo.gc.ca/today/model_cansips/100km/forecast/
-# Format: GRIB2 per-member files; HTTP adapter needs cfgrib extension
-# See: https://github.com/accord-research/rosetta/issues/2
+# CanSIPS-IC4 via the Columbia CCSR successor (issue #14, #2).
+# PROVENANCE: mirror (CCSR aggregator, same as SPEAR above). The producing-center
+# original is ECCC's MSC Datamart, but that is GRIB2 (needs a cfgrib adapter) —
+# CCSR's clean OPeNDAP is preferred. An ECCC-original adapter, if built, would be
+# its own channel (e.g. `eccc/cansipsic4`). NB: CanSIPS also exists under the
+# Copernicus channel as c3s/eccc-cansips* — distinct distributions of the model.
 nmme/cansipsic4:
-  adapter: http
-  pending_url: true
-  pending_url_note: "Pending: CanSIPS-IC4 MSC Datamart is GRIB2 format; HTTP adapter needs cfgrib extension. Source URL requires adapter work. Track https://github.com/accord-research/rosetta/issues/2"
-  source_url: "https://dd.meteo.gc.ca/today/model_cansips/100km/forecast/"
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4/forecast"
   variables:
     precip:
-      native_name: PrecipRate
-      units: "mm/day"
-      target_units: "mm/day"
+      native_name: prcp
+      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
+      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
+      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
+      # scale-invariant, so this does not affect §8; the label is just honest.
+      units: "mm"
+      target_units: "mm"
     temp:
-      native_name: AirTemp
+      native_name: t2m
       units: K
       target_units: C
     sst:
-      native_name: SeaSfcHeight-Geoid
+      native_name: sst
       units: K
       target_units: K
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 20
-    hindcast_range: [1981, 2010]
+    members: 40
+    hindcast_range: [1991, 2020]
 
 nmme/cansipsic4-hindcast:
-  adapter: http
-  pending_url: true
-  pending_url_note: "Pending: CanSIPS-IC4 hindcast source URL not yet identified. Track https://github.com/accord-research/rosetta/issues/2"
-  source_url: null
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4/hindcast"
   variables:
     precip:
-      native_name: PrecipRate
-      units: "mm/day"
-      target_units: "mm/day"
+      native_name: prcp
+      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
+      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
+      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
+      # scale-invariant, so this does not affect §8; the label is just honest.
+      units: "mm"
+      target_units: "mm"
     temp:
-      native_name: AirTemp
+      native_name: t2m
       units: K
       target_units: C
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 20
-    hindcast_range: [1981, 2010]
+    members: 40
+    hindcast_range: [1991, 2020]
