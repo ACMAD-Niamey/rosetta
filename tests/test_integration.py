@@ -669,3 +669,95 @@ def test_fetch_era5_temp():
     )
     _check_dataset(ds, "temp", REGION)
     assert ds["temp"].attrs["units"] == "C"
+
+
+# ── Shapefile region input, per data-source system (rosetta-plan §5, #12) ────
+# Each adapter slices the bbox differently — OPeNDAP/NCEI/CCSR by xarray dims,
+# CDS server-side via `area`, HTTP via COG windows, Sheerwater via bbox→global —
+# so every system gets a shapefile case to prove the bbox→adapter→polygon-clip
+# path end to end. Params mirror each adapter's existing integration test (the
+# known-good live calls); the masking step itself is adapter-agnostic.
+#
+# Not covered: s3 (NMME hindcast storage — same in-memory slice as OPeNDAP, but
+# needs AWS creds), iridl (sunset, replaced by ccsr), mars (no catalog product).
+
+def _kenya_shapefile():
+    from pathlib import Path
+    shp = Path(__file__).resolve().parents[1] / "data" / "shapefiles" / "kenya.shp"
+    if not shp.exists():
+        pytest.skip("kenya.shp missing; run scripts/fetch_country_shapefiles.py")
+    return str(shp)
+
+
+def _assert_masked_to_kenya(ds, variable):
+    """The result must be a Kenya-bbox grid with data inside the border and
+    NaN outside it (Kenya is non-rectangular, so a polygon mask must show both)."""
+    import numpy as np
+    _check_dataset(ds, variable)
+    field = ds[variable]
+    for dim in ("member", "M", "lead_time", "init_time", "time"):
+        if dim in field.dims:
+            field = field.isel({dim: 0})
+    assert bool(field.notnull().any()), "no data inside Kenya"
+    assert bool(field.isnull().any()), "expected cells masked outside the polygon"
+    nairobi = field.sel(lat=-1.3, lon=36.8, method="nearest")
+    assert not bool(np.isnan(nairobi)), "expected data at Nairobi"
+
+
+# (product, variable, fetch kwargs) per system; id = adapter name.
+_SHAPEFILE_SYSTEMS = [
+    pytest.param("nmme/cfsv2", "precip",
+                 dict(init="2010-02", target="MAM", hindcast=(2010, 2010)),
+                 id="opendap"),
+    pytest.param("nmme/ccsm4", "precip",
+                 dict(init="2024-01", target="MAM", hindcast=(2024, 2024)),
+                 id="ncei"),
+    pytest.param("nmme/spear", "precip",
+                 dict(init="2024-01", target="MAM", hindcast=(2024, 2024)),
+                 id="ccsr"),
+    pytest.param("obs/chirps-direct", "precip",
+                 dict(init="2024-03"),
+                 id="http"),
+    pytest.param("obs/chirps", "precip",
+                 dict(init="2010-03", target="MAM"),
+                 id="sheerwater"),
+    pytest.param("c3s/ecmwf", "precip",
+                 dict(init="2000-01", target="MAM", hindcast=(2000, 2000)),
+                 marks=pytest.mark.cds, id="cds"),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.parametrize("product, variable, kwargs", _SHAPEFILE_SYSTEMS)
+def test_fetch_shapefile_region_per_system(product, variable, kwargs):
+    """Every data-source system honours a Kenya shapefile region. Needs the
+    `geo` extra (geopandas) + the kenya.shp fixture."""
+    pytest.importorskip("geopandas")
+    shp = _kenya_shapefile()
+    ds = rosetta.fetch(product, variable, region=shp, verbose=True, **kwargs)
+    _assert_masked_to_kenya(ds, variable)
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_cache_keys_on_region_not_just_product():
+    """Two different shapefiles (different bbox) for the SAME product must not
+    collide in the cache: requesting Nigeria must never return Kenya's cached
+    data. Guards that the region/bbox is part of the raw cache key."""
+    from pathlib import Path
+    pytest.importorskip("geopandas")
+    shp_dir = Path(__file__).resolve().parents[1] / "data" / "shapefiles"
+    kenya, nigeria = shp_dir / "kenya.shp", shp_dir / "nigeria.shp"
+    if not (kenya.exists() and nigeria.exists()):
+        pytest.skip("country shapefiles missing; run scripts/fetch_country_shapefiles.py")
+
+    common = dict(product="nmme/cfsv2", variable="precip",
+                  init="2010-02", target="MAM", hindcast=(2010, 2010))
+    k = rosetta.fetch(region=str(kenya), verbose=False, **common)["precip"]
+    n = rosetta.fetch(region=str(nigeria), verbose=False, **common)["precip"]
+
+    # Nigeria (West Africa, lon ~3–14) must not come back as Kenya (lon ~34–42).
+    assert float(k.lon.min()) > 30, "Kenya extent unexpected"
+    assert float(n.lon.max()) < 20, \
+        "Nigeria returned Kenya's cached data — region missing from cache key"

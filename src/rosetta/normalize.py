@@ -75,7 +75,48 @@ def _decode_numeric_times(ds):
     return ds
 
 
-def normalize(ds, product_config, variable, region=None):
+def clip_to_geometry(ds, geometry, all_touched=False):
+    """Mask a lat/lon dataset to a polygon, NaN-ing cells outside it.
+
+    This is the final, true-polygon clip that refines the coarse bbox crop:
+    bbox slicing keeps a rectangle, this keeps only cells inside ``geometry``.
+    The dataset must have ``lat``/``lon`` dims; ``geometry`` must be a shapely
+    geometry in EPSG:4326 (as returned by :func:`rosetta.region.resolve_region`).
+
+    Uses rioxarray's geometry clip (rioxarray is a core dependency).
+    ``all_touched`` selects the boundary rule (matching rasterio's parameter):
+
+    * ``False`` (default): a cell is kept only if its centre lies inside the
+      polygon — the xarray/CDO/rasterio convention, and unbiased for area means.
+    * ``True``: every cell the polygon touches is kept, so the shape is covered
+      to its true edges (given fetch() padded the grid past them).
+
+    ``drop=True`` crops the output to the polygon's bounding box so there's no
+    NaN margin from any padding. Cells inside the bbox but excluded by the
+    boundary rule remain NaN.
+    """
+    import rioxarray  # noqa: F401  registers the .rio accessor
+
+    if "lat" not in ds.dims or "lon" not in ds.dims:
+        return ds
+
+    clipped = ds.rio.set_spatial_dims(x_dim="lon", y_dim="lat", inplace=False)
+    clipped = clipped.rio.write_crs("EPSG:4326", inplace=False)
+    clipped = clipped.rio.clip([geometry], crs="EPSG:4326",
+                               drop=True, all_touched=all_touched)
+    # rio.clip adds a `spatial_ref` coord and a `grid_mapping` encoding; strip
+    # them so the result matches the plain (lat, lon, ...) schema callers expect.
+    clipped = clipped.drop_vars("spatial_ref", errors="ignore")
+    for v in clipped.data_vars:
+        clipped[v].encoding.pop("grid_mapping", None)
+    # rio.clip can flip lat to descending; restore the ascending convention.
+    if "lat" in clipped.dims:
+        clipped = clipped.sortby("lat")
+    return clipped
+
+
+def normalize(ds, product_config, variable, region=None, geometry=None,
+              boundary="center"):
     ds = _decode_numeric_times(ds)
 
     # ECMWF S2S GRIB files use `time` as the (scalar) init issuance and
@@ -131,8 +172,23 @@ def normalize(ds, product_config, variable, region=None):
     if "lat" in ds.dims:
         ds = ds.sortby("lat")
 
-    if region and "lat" in ds.dims and "lon" in ds.dims:
+    cover = boundary == "cover"
+
+    if geometry is not None and "lat" in ds.dims and "lon" in ds.dims:
+        # Polygon mask drives the spatial selection; the boundary rule (centre
+        # vs all-touched) follows `boundary`. clip crops to the polygon's bbox.
+        ds = clip_to_geometry(ds, geometry, all_touched=cover)
+    elif region and "lat" in ds.dims and "lon" in ds.dims:
         lat_s, lat_n, lon_w, lon_e = region
+        if cover:
+            # Include every cell whose extent overlaps the requested box, i.e.
+            # cells whose centre lies within half a grid step of the bounds.
+            r_lat = (float(np.median(np.diff(ds.lat.values))) / 2
+                     if ds.sizes.get("lat", 0) > 1 else 0.0)
+            r_lon = (float(np.median(np.diff(ds.lon.values))) / 2
+                     if ds.sizes.get("lon", 0) > 1 else 0.0)
+            lat_s, lat_n = lat_s - r_lat, lat_n + r_lat
+            lon_w, lon_e = lon_w - r_lon, lon_e + r_lon
         ds = ds.sel(lat=slice(lat_s, lat_n), lon=slice(lon_w, lon_e))
 
     for coord, attr in [("lat", "Y"), ("lon", "X"), ("time", "T"), ("init_time", "T")]:
