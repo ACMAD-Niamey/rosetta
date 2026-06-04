@@ -6,6 +6,7 @@ from .mars import MARSAdapter
 from .ncei import NCEIAdapter
 from .s3 import S3Adapter
 from .sheerwater import SheerwaterAdapter
+from .ccsr import CCSRAdapter
 
 _ADAPTERS = {
     "cds": CDSAdapter,
@@ -16,6 +17,7 @@ _ADAPTERS = {
     "ncei": NCEIAdapter,
     "s3": S3Adapter,
     "sheerwater": SheerwaterAdapter,
+    "ccsr": CCSRAdapter,
 }
 
 

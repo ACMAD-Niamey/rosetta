@@ -1011,17 +1011,23 @@ def test_http_adapter_rate_limiter_enforces_minimum_interval(monkeypatch):
     assert len(paced) >= 11
 
 
-def test_placeholder_entries_exist_and_return_healthy_false():
+def test_ccsr_entries_wired_and_config_healthy():
+    """SPEAR / SPEARb / CanSIPS-IC4 were placeholders while the IRI Data Library
+    sunset left them unreachable. Issue #14 wired them to the Columbia CCSR
+    successor via the `ccsr` adapter, so they are no longer pending and pass the
+    config-level health check."""
     from rosetta import health, catalog
-    placeholders = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
+    ccsr_entries = ["nmme/spear", "nmme/spear-hindcast", "nmme/spearb",
                     "nmme/spearb-hindcast", "nmme/cansipsic4", "nmme/cansipsic4-hindcast"]
-    for product in placeholders:
+    for product in ccsr_entries:
         cfg = catalog.info(product)
-        assert cfg.get("pending_url") is True, f"{product} should have pending_url: true"
-        result = health.check_product(product)
-        assert result["healthy"] is False, f"{product} should return healthy=False"
-        assert "pending" in result["message"].lower() or "url" in result["message"].lower(), \
-            f"{product} message should explain the pending URL: {result['message']}"
+        assert cfg["adapter"] == "ccsr", f"{product} should use the ccsr adapter"
+        assert cfg.get("pending_url") is not True, f"{product} is no longer pending"
+        assert cfg.get("source_url"), f"{product} should have a CCSR source_url"
+        assert "forecast.ccsr.columbia.edu" in cfg["source_url"]
+        result = health.check_product(product)  # config-only (no remote probe)
+        assert result["healthy"] is True, \
+            f"{product} config health should pass once wired: {result}"
 
 
 # ---------------------------------------------------------------------------
