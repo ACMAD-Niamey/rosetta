@@ -157,11 +157,18 @@ def _open_cog_subset(url, region, variable=None, fill_value=None):
     # Drop band dim if it's size 1
     if "band" in ds.dims and ds.sizes["band"] == 1:
         ds = ds.squeeze("band", drop=True)
-    # Add time coordinate from filename
-    m = re.search(r'(\d{4})\.(\d{2})', url)
-    if m and "time" not in ds.dims:
-        ts = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")
-        ds = ds.expand_dims(time=[ts])
+    # Add time coordinate from filename. Monthly/COG names carry YYYY.MM
+    # (e.g. chirps-v3.0.2020.01.cog); annual rasters carry only the year
+    # (e.g. chirps-v2.0.2020.tif), in which case we stamp January 1.
+    if "time" not in ds.dims:
+        m = re.search(r'(\d{4})\.(\d{2})', url)
+        if m:
+            ts = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")
+            ds = ds.expand_dims(time=[ts])
+        else:
+            ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
+            if ym:
+                ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
     return ds
 
 
@@ -247,13 +254,13 @@ class HTTPAdapter(AdapterBase):
 
         urls = [base_url.rstrip("/") + "/" + f for f in files]
         if verbose:
-            # The COG path is sequential; only the netcdf path uses workers.
-            workers = min(_MAX_WORKERS, len(urls)) if fmt != "cog" else 1
+            # The COG/TIF raster path is sequential; only netcdf uses workers.
+            workers = min(_MAX_WORKERS, len(urls)) if fmt not in ("cog", "tif") else 1
             print(f"[rosetta:http] downloading {len(urls)} file(s) "
                   f"(format={fmt}, workers={workers}, "
                   f"max_retries={max_retries}, request_interval={request_interval}s)")
 
-        if fmt == "cog":
+        if fmt in ("cog", "tif"):
             var_cfg = product_config.get("variables", {}).get(variable, {})
             native_name = var_cfg.get("native_name", variable)
             fill_value = var_cfg.get("fill_value")

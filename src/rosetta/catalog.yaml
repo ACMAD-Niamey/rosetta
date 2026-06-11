@@ -727,48 +727,23 @@ c3s/ukmo-daily:
     members: 7
     hindcast_range: [1993, 2016]
 
-# Default CHIRPS: Sheerwater-backed (public Zarr, 0.25°, land-sea masked).
-# The direct UCSB COG path (0.05°) is preserved as obs/chirps-direct below.
-# §3.2 strategy (a): make the Sheerwater entry the default `obs/chirps`,
-# keep the direct entry available but deprecated.
-obs/chirps:
-  adapter: sheerwater
-  source: chirps_v3
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-  grid:
-    lat_res: 0.25
-    lon_res: 0.25
-    members: null
-    hindcast_range: [1981, 2024]
-    temporal: monthly
-  notes: "Default CHIRPS. Sheerwater chirps_v3 (public GCS Zarr, 0.25°). Direct UCSB COG (0.05°) at obs/chirps-direct."
+# ---------------------------------------------------------------------------
+# CHIRPS (UCSB Climate Hazards Center precipitation)
+#
+# Naming convention: obs/chirps-{version}-{cadence}[-rhiza]
+#   - Native UCSB products carry only version + cadence
+#     (e.g. obs/chirps-v3-monthly). Native data is 0.05°, 1981-present
+#     (daily v3 starts 1998), served as COG (monthly), per-year NetCDF
+#     (daily/pentad/dekad), or GeoTIFF (annual).
+#   - Rhiza Research / Sheerwater mirrors end in -rhiza: a regridded 0.25°
+#     copy on public GCS as Zarr. Convenient and cheap to crop, but NOT the
+#     native record (coarser grid; chirps_v3 only covers 2000+).
+# Sub-monthly native cadences are one NetCDF per year, fetched whole then
+# cropped (no server-side subsetting), so they are bandwidth-heavy.
+# ---------------------------------------------------------------------------
 
-# Direct UCSB COG CHIRPS v3 (0.05°). Superseded by the Sheerwater-backed
-# obs/chirps above; kept for users who need the native 0.05° resolution or
-# want to avoid the Sheerwater dependency.
-obs/chirps-direct:
-  adapter: http
-  deprecated_after: "2026-06-01"
-  successor: obs/chirps
-  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/"
-  file_pattern: "chirps-v3.0.{year}.{month:02d}.cog"
-  format: cog
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/month"
-      target_units: "mm/day"
-      fill_value: -9999
-  grid:
-    lat_res: 0.05
-    lon_res: 0.05
-    temporal: monthly
-
-obs/chirps-v2:
+# --- Native UCSB CHIRPS v2.0 (0.05°) ---
+obs/chirps-v2-monthly:
   adapter: http
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_monthly/cogs/"
   file_pattern: "chirps-v2.0.{year}.{month:02d}.cog"
@@ -782,16 +757,191 @@ obs/chirps-v2:
   grid:
     lat_res: 0.05
     lon_res: 0.05
+    hindcast_range: [1981, 2025]
     temporal: monthly
+  notes: "Native UCSB CHIRPS v2.0 monthly (0.05° COG)."
 
-# CHIRPS dekadal-style (10-day rolling aggregation) via Sheerwater's
-# chirps_v2 function with agg_days=10. Used by the deepscale S2S
-# testbed for per-dekad climatology baselines and verification.
-# Note: this is a 10-day rolling window, not strict calendar dekads
-# (1–10, 11–20, 21–end-of-month). Sufficient for climatology slicing;
-# Plan C's per-dekad verification needs to handle the rolling-window
-# semantics explicitly.
-obs/chirps-dekadal:
+obs/chirps-v2-daily:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/netcdf/p05/"
+  file_pattern: "chirps-v2.0.{year}.days_p05.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: daily
+  notes: "Native UCSB CHIRPS v2.0 daily. One NetCDF per year (~1 GiB each); downloaded whole then cropped."
+
+obs/chirps-v2-pentad:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_pentad/netcdf/"
+  file_pattern: "chirps-v2.0.{year}.pentads.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 5-day accumulation; left as a total, not a daily rate
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: pentad
+  notes: "Native UCSB CHIRPS v2.0 pentad (5-day totals, mm). One NetCDF per year."
+
+obs/chirps-v2-dekad:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_dekad/netcdf/"
+  file_pattern: "chirps-v2.0.{year}.dekads.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 10-day calendar dekad accumulation
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: dekad
+  notes: "Native UCSB CHIRPS v2.0 calendar dekad (10-day totals, mm). One NetCDF per year. Distinct from obs/chirps-v2-dekadal-rhiza (10-day ROLLING)."
+
+obs/chirps-v2-annual:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_annual/tifs/"
+  file_pattern: "chirps-v2.0.{year}.tif"
+  format: tif
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # annual total
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2024]
+    temporal: annual
+  notes: "Native UCSB CHIRPS v2.0 annual totals (mm, GeoTIFF, one file per year)."
+
+# --- Native UCSB CHIRPS v3.0 (0.05°) ---
+obs/chirps-v3-monthly:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.cog"
+  format: cog
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/month"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: monthly
+  notes: "Native UCSB CHIRPS v3.0 monthly (0.05° COG). Was obs/chirps-direct."
+
+obs/chirps-v3-daily:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat/netcdf/byYear/"
+  file_pattern: "chirps-v3.0.sat.{year}.days_p05.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1998, 2025]
+    temporal: daily
+  notes: "Native UCSB CHIRPS v3.0 daily (satellite-blended final). WARNING: one NetCDF per year is ~23.5 GiB and is downloaded whole before cropping — for routine daily use prefer obs/chirps-v3-daily-rhiza (0.25°). Coverage starts 1998."
+
+obs/chirps-v3-pentad:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/pentads/global/netcdf/"
+  file_pattern: "chirps-v3.0.{year}.pentads.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: pentad
+  notes: "Native UCSB CHIRPS v3.0 pentad (5-day totals, mm). One NetCDF per year."
+
+obs/chirps-v3-dekad:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/dekads/global/netcdf/"
+  file_pattern: "chirps-v3.0.{year}.dekads.nc"
+  format: netcdf
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: dekad
+  notes: "Native UCSB CHIRPS v3.0 calendar dekad (10-day totals, mm). One NetCDF per year. Distinct from obs/chirps-v2-dekadal-rhiza (10-day ROLLING)."
+
+obs/chirps-v3-annual:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/annual/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.tif"
+  format: tif
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: annual
+  notes: "Native UCSB CHIRPS v3.0 annual totals (mm, GeoTIFF, one file per year)."
+
+# --- Rhiza Research / Sheerwater mirrors (0.25° Zarr on public GCS) ---
+obs/chirps-v3-daily-rhiza:
+  adapter: sheerwater
+  source: chirps_v3
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 0.25
+    lon_res: 0.25
+    members: null
+    hindcast_range: [2000, 2024]
+    temporal: daily
+  notes: "Rhiza Research / Sheerwater chirps_v3 mirror (public GCS Zarr, 0.25°, daily). Coarsened from native 0.05° and only covers 2000-~mid-2024 (verified), unlike native obs/chirps-v3-* which start 1981. Was the bare obs/chirps default."
+
+obs/chirps-v2-dekadal-rhiza:
   adapter: sheerwater
   source: chirps_v2
   source_kwargs:
@@ -805,6 +955,7 @@ obs/chirps-dekadal:
     lat_res: 0.25
     lon_res: 0.25
     temporal: dekadal-rolling
+  notes: "Rhiza Research / Sheerwater chirps_v2 with agg_days=10: a 10-day ROLLING window (not calendar dekads). Used by the deepscale S2S testbed. For calendar dekads use native obs/chirps-{v2,v3}-dekad. Was obs/chirps-dekadal."
 
 # GPM IMERG Final precipitation via Sheerwater's imerg_final (public Zarr,
 # 0.25°, land-sea masked). Satellite precip; complements CHIRPS, esp. where
@@ -845,12 +996,13 @@ obs/ghcn:
     temporal: monthly
   notes: "GHCN gauge average. Sheerwater-backed (public GCS Zarr, 0.25°). Precip only."
 
-# CHIRPS preliminary live feed via Sheerwater's chirps_raw_live.
+# CHIRPS preliminary live feed via Rhiza/Sheerwater's chirps_raw_live.
 # Daily values (no aggregation parameter — caller must aggregate to
 # dekads downstream). ~8-day lag from the present (vs. ~3-week lag of
 # chirps_v2). Used by the deepscale S2S testbed for recent-obs scoring
-# when the finalized v2 data hasn't caught up yet.
-obs/chirps-live:
+# when the finalized v2 data hasn't caught up yet. Lineage (v2 vs v3
+# prelim) not yet confirmed, so the name carries no version token.
+obs/chirps-live-rhiza:
   adapter: sheerwater
   source: chirps.chirps_raw_live
   source_kwargs:
@@ -870,6 +1022,7 @@ obs/chirps-live:
     lat_res: 0.05  # CHIRPS native resolution
     lon_res: 0.05
     temporal: daily
+  notes: "Rhiza Research / Sheerwater chirps_raw_live preliminary near-real-time feed (~8-day lag). Mirror of UCSB CHIRPS prelim. Was obs/chirps-live."
 
 c3s/ecmwf-monthly:
   adapter: cds

@@ -162,21 +162,43 @@ def test_fetch_nmme_gemnemo_temp():
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
+# Native UCSB CHIRPS. Monthly is COG and annual is GeoTIFF — both range-read,
+# so they're light. The Sheerwater mirror routing is covered (mocked) by
+# tests/test_sheerwater_catalog.py.
+_CHIRPS_NATIVE_RASTER = [
+    pytest.param("obs/chirps-v3-monthly", dict(hindcast=(2020, 2020), region=REGION), "mm/day", id="v3-monthly"),
+    pytest.param("obs/chirps-v2-monthly", dict(hindcast=(2020, 2020), region=REGION), "mm/day", id="v2-monthly"),
+    pytest.param("obs/chirps-v3-annual", dict(hindcast=(2020, 2020), region=REGION), "mm", id="v3-annual"),
+    pytest.param("obs/chirps-v2-annual", dict(hindcast=(2020, 2020), region=REGION), "mm", id="v2-annual"),
+]
+
+
 @pytest.mark.integration
 @pytest.mark.network
-def test_fetch_chirps_precip():
-    # obs/chirps now defaults to the Sheerwater-backed entry (rosetta #7); the
-    # direct UCSB COG/http path this network test was written for lives at
-    # obs/chirps-direct. The Sheerwater routing is covered (mocked) by
-    # tests/test_sheerwater_catalog.py::test_fetch_obs_chirps_through_sheerwater.
+@pytest.mark.parametrize("product, kwargs, units", _CHIRPS_NATIVE_RASTER)
+def test_fetch_chirps_native_raster(product, kwargs, units):
+    ds = rosetta.fetch(product=product, variable="precip", verbose=True, **kwargs)
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == units
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_fetch_chirps_native_dekad_netcdf():
+    # Sub-monthly native cadences are one NetCDF per year, downloaded whole then
+    # cropped. v2 dekad is the smallest (~160 MiB/yr) and exercises the netcdf
+    # cadence path end to end. v3-daily is deliberately NOT tested here — its
+    # per-year NetCDF is ~23.5 GiB; use obs/chirps-v3-daily-rhiza for daily.
     ds = rosetta.fetch(
-        product="obs/chirps-direct",
+        product="obs/chirps-v2-dekad",
         variable="precip",
+        hindcast=(2020, 2020),
         region=REGION,
         verbose=True,
     )
     _check_dataset(ds, "precip", REGION)
-    assert ds["precip"].attrs["units"] == "mm/day"
+    assert ds["precip"].attrs["units"] == "mm"   # 10-day totals, not a daily rate
+    assert ds.sizes["time"] == 36                 # 36 calendar dekads per year
 
 
 # ── HTTP adapter: retries + rate limiting (local flaky NetCDF server) ───────
@@ -715,10 +737,10 @@ _SHAPEFILE_SYSTEMS = [
     pytest.param("nmme/spear", "precip",
                  dict(init="2024-01", target="MAM", hindcast=(2024, 2024)),
                  id="ccsr"),
-    pytest.param("obs/chirps-direct", "precip",
+    pytest.param("obs/chirps-v3-monthly", "precip",
                  dict(init="2024-03"),
                  id="http"),
-    pytest.param("obs/chirps", "precip",
+    pytest.param("obs/chirps-v3-daily-rhiza", "precip",
                  dict(init="2010-03", target="MAM"),
                  id="sheerwater"),
     pytest.param("c3s/ecmwf", "precip",

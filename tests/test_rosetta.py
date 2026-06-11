@@ -26,7 +26,7 @@ def test_catalog_list_products():
     assert isinstance(products, list)
     assert all(isinstance(p, str) for p in products)
     assert "nmme/cfsv2" in products
-    assert "obs/chirps" in products
+    assert "obs/chirps-v3-monthly" in products
 
 
 def test_catalog_info():
