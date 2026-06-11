@@ -693,6 +693,41 @@ def test_fetch_era5_temp():
     assert ds["temp"].attrs["units"] == "C"
 
 
+# ── ERA5-Land monthly (CDS, 0.1° land sibling of obs/era5) ───────────────────
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_era5_land_monthly_precip():
+    ds = rosetta.fetch(
+        product="obs/era5-land-monthly",
+        variable="precip",
+        init="2024-01",
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == "mm/day"
+    # Distinguishing feature vs obs/era5 (0.25°): the land product is 0.1°.
+    assert round(float(abs(ds.lon[1] - ds.lon[0])), 2) == 0.1
+    assert round(float(abs(ds.lat[1] - ds.lat[0])), 2) == 0.1
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_era5_land_monthly_temp():
+    ds = rosetta.fetch(
+        product="obs/era5-land-monthly",
+        variable="temp",
+        init="2024-01",
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "temp", REGION)
+    assert ds["temp"].attrs["units"] == "C"
+
+
 # ── Shapefile region input, per data-source system (rosetta-plan §5, #12) ────
 # Each adapter slices the bbox differently — OPeNDAP/NCEI/CCSR by xarray dims,
 # CDS server-side via `area`, HTTP via COG windows, Sheerwater via bbox→global —

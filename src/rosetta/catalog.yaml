@@ -1134,6 +1134,33 @@ obs/era5:
     lat_res: 0.25
     lon_res: 0.25
 
+obs/era5-land-monthly:
+  adapter: cds
+  cds_dataset: "reanalysis-era5-land-monthly-means"
+  product_type: "monthly_averaged_reanalysis"
+  # Higher-resolution (0.1°) land reanalysis, 1950-present. The land sibling of
+  # obs/era5 (single-levels, 0.25°) — used as the reference/truth for scoring
+  # downscaled precip (e.g. the SaWaM SEAS5-BCSD product). Land-only, so no SST.
+  # Same CDS request shape as obs/era5 (monthly_averaged_reanalysis), so no
+  # adapter changes. tp uses the same m→mm/day (×1000) convention as obs/era5.
+  # Cadence is explicit in the name (per the CHIRPS naming convention); daily
+  # (derived-era5-land-daily-statistics) and hourly (reanalysis-era5-land) are
+  # separate CDS datasets with different request shapes — future entries.
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+  grid:
+    lat_res: 0.1
+    lon_res: 0.1
+
 # GFDL SPEAR / SPEARb (precip, temp, SST) via the Columbia CCSR successor (#14).
 #
 # PROVENANCE: mirror. CCSR (forecast.ccsr.columbia.edu) is an *aggregator* — the
