@@ -4,7 +4,7 @@ Tracks planned work beyond v0. Organized roughly by priority.
 
 ## New products and catalog expansion
 
-Current catalog covers `nmme/cfsv2`, `c3s/ecmwf`, `c3s/ecmwf-monthly`, `obs/chirps`, `obs/era5`.
+Current catalog covers `nmme/cfsv2`, `c3s/ecmwf`, `c3s/ecmwf-monthly`, the `obs/chirps-{v2,v3}-{cadence}` family, `obs/era5`.
 
 ### GCM / forecast products to add
 
@@ -21,8 +21,8 @@ Current catalog covers `nmme/cfsv2`, `c3s/ecmwf`, `c3s/ecmwf-monthly`, `obs/chir
 
 ### Observation / reanalysis products to add
 
-- [ ] `obs/era5-land` — ERA5-Land higher-resolution reanalysis
-- [ ] `obs/chirps-daily` — daily CHIRPS (currently only monthly)
+- [x] `obs/era5-land-monthly` — ERA5-Land higher-resolution (0.1°) monthly reanalysis (done 2026-06-11; precip+temp; daily/hourly cadences are separate CDS datasets, future entries)
+- [x] `obs/chirps-{v2,v3}-daily` — daily CHIRPS (done 2026-06-10; pentad/dekad/annual added too)
 - [ ] `obs/cpc` — CPC global temperature and precipitation
 - [ ] `obs/gpcc` — GPCC precipitation
 - [ ] `obs/mswep` — Multi-Source Weighted-Ensemble Precipitation
