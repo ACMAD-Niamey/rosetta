@@ -71,7 +71,7 @@ def test_fetch_cache_false_bypasses_nuthatch():
         mock_get_adapter.return_value = mock_adapter
 
         from rosetta.fetch import fetch
-        fetch("obs/chirps", variable="precip", cache=False)
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=False)
 
         mock_cached.assert_not_called()
         mock_adapter.fetch_data.assert_called_once()
@@ -91,7 +91,7 @@ def test_fetch_cache_true_uses_nuthatch():
 
     with patch("rosetta.fetch._fetch_raw_cached", return_value=fake_ds) as mock_cached:
         from rosetta.fetch import fetch
-        fetch("obs/chirps", variable="precip", cache=True)
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True)
         mock_cached.assert_called_once()
 
 
@@ -133,16 +133,16 @@ def test_different_products_call_adapter_separately():
 
     def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
         call_log.append(product)
-        if product == "obs/chirps":
+        if product == "obs/chirps-v3-daily-rhiza":
             return chirps_ds
         return era5_ds
 
     with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached):
         from rosetta.fetch import fetch
-        result_chirps = fetch("obs/chirps", variable="precip", cache=True)
+        result_chirps = fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True)
         result_era5 = fetch("obs/era5", variable="temp", cache=True)
 
-    assert call_log == ["obs/chirps", "obs/era5"], \
+    assert call_log == ["obs/chirps-v3-daily-rhiza", "obs/era5"], \
         "Both products must trigger separate cache lookups"
     # CHIRPS has "precip" variable, ERA5 has "temp" — if cache leaked across products,
     # one result would have the wrong variable entirely.
@@ -169,8 +169,8 @@ def test_different_regions_call_adapter_separately():
 
     with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached):
         from rosetta.fetch import fetch
-        fetch("obs/chirps", variable="precip", cache=True, region=[-2, 2, 30, 35])
-        fetch("obs/chirps", variable="precip", cache=True, region=[-10, 10, 20, 50])
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, region=[-2, 2, 30, 35])
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, region=[-10, 10, 20, 50])
 
     assert len(call_regions) == 2, "Different regions must each produce a cache lookup"
     assert call_regions[0] != call_regions[1], "Cache keys for different regions must differ"
@@ -195,8 +195,8 @@ def test_different_date_ranges_call_adapter_separately():
 
     with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached):
         from rosetta.fetch import fetch
-        fetch("obs/chirps", variable="precip", cache=True, hindcast=(2010, 2015))
-        fetch("obs/chirps", variable="precip", cache=True, hindcast=(2016, 2020))
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, hindcast=(2010, 2015))
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, hindcast=(2016, 2020))
 
     assert len(call_date_ranges) == 2, "Different date ranges must each produce a cache lookup"
     assert call_date_ranges[0] != call_date_ranges[1]
@@ -234,8 +234,8 @@ def test_cache_false_never_uses_cached_result():
     with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached), \
          patch("rosetta.fetch.get_adapter", return_value=mock_adapter):
         from rosetta.fetch import fetch
-        fetch("obs/chirps", variable="precip", cache=False)
-        fetch("obs/chirps", variable="precip", cache=False)
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=False)
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=False)
 
     assert call_count["adapter"] == 2, "cache=False must call adapter on every fetch"
     assert call_count["cached"] == 0, "cache=False must never call _fetch_raw_cached"
@@ -277,11 +277,11 @@ def test_fetch_uses_cache_on_second_call(tmp_path, monkeypatch):
 
     with patch("rosetta.fetch.get_adapter", return_value=adapter):
         from rosetta.fetch import fetch
-        first = fetch("obs/chirps", variable="precip", cache=True, verbose=False)
+        first = fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, verbose=False)
         assert adapter.fetch_data.call_count == 1, \
             "First fetch must call the adapter"
 
-        second = fetch("obs/chirps", variable="precip", cache=True, verbose=False)
+        second = fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True, verbose=False)
         assert adapter.fetch_data.call_count == 1, (
             "Second fetch must hit the cache and skip the adapter — "
             "got call_count={}".format(adapter.fetch_data.call_count)

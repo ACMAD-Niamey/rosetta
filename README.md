@@ -140,7 +140,7 @@ prcp_predictor = rosetta.fetch(
 
 # Predictand: observations
 predictand = rosetta.fetch(
-    product="obs/chirps-v2",
+    product="obs/chirps-v2-monthly",
     variable="precip",
     target="MAM",
     region=[-12, 15, 22, 52],
@@ -253,8 +253,9 @@ Monthly hindcast data archived from IRI Data Library to S3 (`s3://acc.ord/nmme-h
 |---------|--------|-----------|-----------|
 | `nmme/cfsv2` | IRI/NMME (OPeNDAP) | monthly | precip, temp |
 | `c3s/ecmwf-seas51c` | IRI Data Library | monthly | precip |
-| `obs/chirps` | UCSB (HTTP/COG) | monthly | precip |
-| `obs/chirps-v2` | UCSB (HTTP/COG) | monthly | precip |
+| `obs/chirps-v3-monthly`, `obs/chirps-v2-monthly` | UCSB (HTTP/COG) | monthly | precip |
+| `obs/chirps-{v2,v3}-{daily,pentad,dekad,annual}` | UCSB (HTTP, NetCDF/TIF) | daily–annual | precip |
+| `obs/chirps-v3-daily-rhiza`, `obs/chirps-v2-dekadal-rhiza`, `obs/chirps-live-rhiza` | Rhiza/Sheerwater (GCS Zarr, 0.25°) | daily / 10-day / live | precip |
 | `obs/era5` | CDS | monthly | temp |
 
 Output is always NetCDF (extensible to Zarr/GeoTIFF).

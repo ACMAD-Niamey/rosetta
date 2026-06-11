@@ -4207,6 +4207,10 @@ demo = [
 dev = [
     { name = "pytest" },
 ]
+geo = [
+    { name = "geopandas" },
+    { name = "rasterio" },
+]
 s3 = [
     { name = "boto3" },
 ]
@@ -4219,6 +4223,7 @@ requires-dist = [
     { name = "cfgrib", specifier = ">=0.9.15.1" },
     { name = "eccodeslib", specifier = ">=2.46.2.19" },
     { name = "ecmwf-api-client", specifier = ">=1.6" },
+    { name = "geopandas", marker = "extra == 'geo'" },
     { name = "matplotlib", marker = "extra == 'demo'" },
     { name = "netcdf4" },
     { name = "numpy" },
@@ -4226,13 +4231,14 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyyaml" },
     { name = "rasterio", marker = "extra == 'demo'" },
+    { name = "rasterio", marker = "extra == 'geo'" },
     { name = "rioxarray" },
     { name = "scipy" },
     { name = "sheerwater", specifier = ">=0.2.5" },
     { name = "tqdm" },
     { name = "xarray" },
 ]
-provides-extras = ["s3", "dev", "demo"]
+provides-extras = ["s3", "dev", "demo", "geo"]
 
 [[package]]
 name = "s3fs"

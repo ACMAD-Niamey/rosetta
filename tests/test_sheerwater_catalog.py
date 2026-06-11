@@ -1,8 +1,9 @@
 """§3.2 Sheerwater-backed catalog entries (rosetta #7) + ERA5 enrichment.
 
-obs/chirps now routes through the Sheerwater adapter (chirps_v3); the old
-direct UCSB COG path is preserved as obs/chirps-direct (deprecated). obs/imerg
-and obs/ghcn are new Sheerwater-backed precip entries. obs/era5 (cds) gains a
+CHIRPS now uses an explicit obs/chirps-{version}-{cadence}[-rhiza] naming
+(see tests/test_chirps_catalog.py): native UCSB products on the http adapter,
+Rhiza/Sheerwater mirrors ending in -rhiza. obs/imerg and obs/ghcn are
+Sheerwater-backed precip entries. obs/era5 (cds) gains a
 precip variable so ERA5 stays broadly usable without Sheerwater (the installed
 sheerwater build exposes no era5 data function).
 """
@@ -15,18 +16,22 @@ from unittest.mock import MagicMock, patch
 from rosetta import catalog
 
 
-def test_obs_chirps_routes_to_sheerwater():
-    e = catalog.info("obs/chirps")
+def test_obs_chirps_v3_daily_rhiza_routes_to_sheerwater():
+    e = catalog.info("obs/chirps-v3-daily-rhiza")
     assert e["adapter"] == "sheerwater"
     assert e["source"] == "chirps_v3"
     assert "precip" in e["variables"]
 
 
-def test_obs_chirps_direct_preserved_and_deprecated():
-    e = catalog.info("obs/chirps-direct")
-    assert e["adapter"] == "http"            # original UCSB COG path retained
-    assert e["deprecated"] is True           # deprecated_after is in the past
-    assert e.get("successor") == "obs/chirps"
+def test_obs_chirps_v3_monthly_is_native_and_not_deprecated():
+    # The old obs/chirps-direct UCSB COG path is now obs/chirps-v3-monthly,
+    # the native v3 monthly product, no longer deprecated (its old `successor`
+    # pointed at the truncated mirror, which was backwards).
+    e = catalog.info("obs/chirps-v3-monthly")
+    assert e["adapter"] == "http"
+    assert not e.get("deprecated")
+    assert "successor" not in e
+    assert e["format"] == "cog"
 
 
 @pytest.mark.parametrize("prod,src", [
@@ -47,7 +52,7 @@ def test_obs_era5_enriched_with_precip():
     assert "temp" in e["variables"]          # original variable preserved
 
 
-@pytest.mark.parametrize("prod", ["obs/chirps", "obs/imerg", "obs/ghcn"])
+@pytest.mark.parametrize("prod", ["obs/chirps-v3-daily-rhiza", "obs/imerg", "obs/ghcn"])
 def test_new_entries_config_health_ok(prod):
     from rosetta.adapters import get_adapter
     e = catalog.info(prod)
@@ -66,12 +71,12 @@ def _raw_monthly(variable="precip"):
                       coords={"time": times, "lat": lat, "lon": lon})
 
 
-def test_fetch_obs_chirps_through_sheerwater():
+def test_fetch_obs_chirps_v3_daily_rhiza_through_sheerwater():
     """End-to-end (mocked sheerwater fn): catalog -> adapter -> normalize."""
     import rosetta
     with patch("sheerwater.data.chirps_v3",
                MagicMock(return_value=_raw_monthly("precip")), create=True):
-        ds = rosetta.fetch("obs/chirps", "precip",
+        ds = rosetta.fetch("obs/chirps-v3-daily-rhiza", "precip",
                            hindcast=(2010, 2010), region=[-2, 2, 30, 34],
                            cache=False, verbose=False)
     assert ds is not None
