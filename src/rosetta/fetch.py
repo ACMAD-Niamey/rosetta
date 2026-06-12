@@ -111,7 +111,11 @@ def fetch(product, variable, init=None, target=None, region=None,
     request_interval: minimum seconds between successive file opens (shared
     across worker threads). Use this to stay under a server's
     requests-per-second budget. Default 0 = no pacing. Currently honoured by
-    the HTTP adapter.
+    the HTTP adapter. A product may declare its own request_interval (and a
+    max_workers concurrency cap) in the catalog as a safety floor; this kwarg
+    can raise that floor but not lower it. The native CHIRPS entries set one so
+    bulk pulls stay under the UCSB CrowdSec rate ban — raise it further for
+    large regional domains (rule of thumb: range-reads-per-file / 2 seconds).
 
     reforecast: when True, fetch the reforecast (hindcast) suite associated
     with the given issuance instead of the forecast itself. Currently

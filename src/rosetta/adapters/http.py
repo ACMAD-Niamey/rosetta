@@ -16,6 +16,20 @@ _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_RETRY_BACKOFF = 1.0
 
 
+def _resolve_max_workers(product_config, n_urls):
+    """Effective NetCDF download concurrency for this product.
+
+    A per-product ``max_workers`` in the catalog entry caps concurrent
+    connections (e.g. so a multi-year pull of multi-GiB CHIRPS NetCDFs doesn't
+    open eight huge downloads at once). It can only lower concurrency, never
+    raise it above the global ``_MAX_WORKERS`` ceiling, and is bounded by the
+    number of files actually being fetched. Always at least one worker.
+    """
+    cap = product_config.get("max_workers")
+    workers = _MAX_WORKERS if cap is None else min(_MAX_WORKERS, int(cap))
+    return max(1, min(workers, n_urls))
+
+
 class _RateLimiter:
     """Thread-safe minimum-interval gate between requests.
 
@@ -228,7 +242,17 @@ class HTTPAdapter(AdapterBase):
         allow_partial = product_config.get("_allow_partial", False)
         max_retries = int(product_config.get("_max_retries", _DEFAULT_MAX_RETRIES))
         retry_backoff = float(product_config.get("_retry_backoff", _DEFAULT_RETRY_BACKOFF))
-        request_interval = float(product_config.get("_request_interval", 0.0))
+        # request_interval is resolved as a *floor*: a per-product catalog value
+        # (plain "request_interval") sets a safe minimum pace that a caller's
+        # fetch(request_interval=...) — injected here as "_request_interval" —
+        # may raise but not silently undercut. Native CHIRPS entries declare one
+        # so multi-file pulls stay under the UCSB CrowdSec rate ban (~2 req/s).
+        _caller_interval = product_config.get("_request_interval")
+        _catalog_interval = product_config.get("request_interval")
+        request_interval = max(
+            float(_caller_interval) if _caller_interval is not None else 0.0,
+            float(_catalog_interval) if _catalog_interval is not None else 0.0,
+        )
         rate_limiter = _RateLimiter(request_interval)
         base_url = product_config["source_url"]
         fmt = product_config.get("format", "netcdf")
@@ -253,9 +277,11 @@ class HTTPAdapter(AdapterBase):
                 files = [file_pattern.format(year=recent.year)]
 
         urls = [base_url.rstrip("/") + "/" + f for f in files]
+        # NetCDF downloads run in a worker pool capped per-product (COG/TIF is
+        # always sequential, so its worker count is 1).
+        netcdf_workers = _resolve_max_workers(product_config, len(urls))
         if verbose:
-            # The COG/TIF raster path is sequential; only netcdf uses workers.
-            workers = min(_MAX_WORKERS, len(urls)) if fmt not in ("cog", "tif") else 1
+            workers = netcdf_workers if fmt not in ("cog", "tif") else 1
             print(f"[rosetta:http] downloading {len(urls)} file(s) "
                   f"(format={fmt}, workers={workers}, "
                   f"max_retries={max_retries}, request_interval={request_interval}s)")
@@ -281,7 +307,8 @@ class HTTPAdapter(AdapterBase):
                     print(f"Error fetching {url}: {e}")
         else:
             datasets, failures = self._fetch_netcdf_parallel(
-                urls, region, progress, rate_limiter, max_retries, retry_backoff, verbose)
+                urls, region, progress, rate_limiter, max_retries, retry_backoff,
+                verbose, netcdf_workers)
 
         if failures and not allow_partial:
             raise RuntimeError(
@@ -316,10 +343,10 @@ class HTTPAdapter(AdapterBase):
         return url, ds
 
     def _fetch_netcdf_parallel(self, urls, region, progress, rate_limiter,
-                               max_retries, retry_backoff, verbose):
+                               max_retries, retry_backoff, verbose, max_workers):
         results = {}
         errors = []
-        with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(urls))) as pool:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(self._download_one, u, region,
                             rate_limiter, max_retries, retry_backoff, verbose): u
