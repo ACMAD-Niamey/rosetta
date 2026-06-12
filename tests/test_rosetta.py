@@ -1011,6 +1011,74 @@ def test_http_adapter_rate_limiter_enforces_minimum_interval(monkeypatch):
     assert len(paced) >= 11
 
 
+def _stub_clock(monkeypatch):
+    """Replace time.monotonic/sleep so the rate limiter advances a virtual clock
+    instead of sleeping for real. Returns the recorded sleep-duration list."""
+    from rosetta.adapters import http as http_mod
+    clock = [0.0]
+    sleeps = []
+    monkeypatch.setattr(http_mod.time, "monotonic", lambda: clock[0])
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock[0] += s
+    monkeypatch.setattr(http_mod.time, "sleep", fake_sleep)
+    return sleeps
+
+
+def test_http_adapter_catalog_request_interval_paces_without_caller_value(monkeypatch):
+    """A request_interval declared in the catalog entry must pace opens even when
+    the caller passes no request_interval — that's how the CHIRPS entries stay
+    under the UCSB CrowdSec rate ban out of the box."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset",
+                        lambda url, region, variable=None, fill_value=None:
+                        _fake_cog_ds(*map(int, re.search(r"(\d{4})\.(\d{2})", url).groups())))
+    sleeps = _stub_clock(monkeypatch)
+
+    adapter = http_mod.HTTPAdapter()
+    # Catalog-style key (no leading underscore), and NO caller _request_interval.
+    config = _http_product_config(request_interval=0.25)
+    adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    paced = [s for s in sleeps if s >= 0.2]
+    assert len(paced) >= 11
+
+
+def test_http_adapter_catalog_interval_is_a_floor_not_a_default(monkeypatch):
+    """The catalog request_interval is a floor: a caller may raise it, but a lower
+    caller value must not silently undercut the product's safe minimum."""
+    import re
+    from rosetta.adapters import http as http_mod
+
+    monkeypatch.setattr(http_mod, "_open_cog_subset",
+                        lambda url, region, variable=None, fill_value=None:
+                        _fake_cog_ds(*map(int, re.search(r"(\d{4})\.(\d{2})", url).groups())))
+    sleeps = _stub_clock(monkeypatch)
+
+    adapter = http_mod.HTTPAdapter()
+    # Catalog floor 0.5 vs a lower caller value 0.25 → floor wins (0.5).
+    config = _http_product_config(request_interval=0.5, _request_interval=0.25)
+    adapter.fetch_data(config, "precip", date_range=(2010, 2010))
+    assert len([s for s in sleeps if s >= 0.45]) >= 11
+
+
+def test_resolve_max_workers_caps_concurrent_connections():
+    """Per-product max_workers caps adapter concurrency (a connection limit),
+    bounded by the global ceiling and the number of files."""
+    from rosetta.adapters.http import _resolve_max_workers, _MAX_WORKERS
+
+    # Catalog cap honoured even with many files / high global ceiling.
+    assert _resolve_max_workers({"max_workers": 2}, 8) == 2
+    # No catalog cap → bounded by the global ceiling, then by file count.
+    assert _resolve_max_workers({}, 100) == _MAX_WORKERS
+    assert _resolve_max_workers({}, 3) == 3
+    # A catalog value can't exceed the global ceiling.
+    assert _resolve_max_workers({"max_workers": 100}, 50) == _MAX_WORKERS
+    # Always at least one worker, never more than the work available.
+    assert _resolve_max_workers({"max_workers": 4}, 1) == 1
+
+
 def test_ccsr_entries_wired_and_config_healthy():
     """SPEAR / SPEARb / CanSIPS-IC4 were placeholders while the IRI Data Library
     sunset left them unreachable. Issue #14 wired them to the Columbia CCSR

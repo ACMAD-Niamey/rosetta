@@ -740,6 +740,19 @@ c3s/ukmo-daily:
 #     native record (coarser grid; chirps_v3 only covers 2000+).
 # Sub-monthly native cadences are one NetCDF per year, fetched whole then
 # cropped (no server-side subsetting), so they are bandwidth-heavy.
+#
+# Throttling: data.chc.ucsb.edu sits behind nginx + CrowdSec, which bans an IP
+# for 4 hours (HTTP 403, "CrowdSec Ban") once it exceeds ~2 requests/sec to
+# non-static files (leaky bucket: capacity 40, leak 2/s). There is no published
+# UCSB rate limit and robots.txt disallows crawling, so that scenario is the
+# real ceiling. Each native entry therefore declares a request_interval floor
+# (seconds between file opens; callers may pass a larger fetch(request_interval=)
+# but cannot go below it). COG/TIF do several HTTP range reads per file, so they
+# pace harder than the whole-file NetCDFs. Rule of thumb for a bulk regional
+# pull: keep (range-reads-per-file / request_interval) under 2 — i.e. raise
+# request_interval for large/continental domains (≈ tiles_per_file / 2 seconds).
+# The NetCDF cadences also cap concurrent connections via max_workers, since one
+# pull can open several multi-GiB downloads at once (v3-daily is ~23.5 GiB/file).
 # ---------------------------------------------------------------------------
 
 # --- Native UCSB CHIRPS v2.0 (0.05°) ---
@@ -748,6 +761,7 @@ obs/chirps-v2-monthly:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_monthly/cogs/"
   file_pattern: "chirps-v2.0.{year}.{month:02d}.cog"
   format: cog
+  request_interval: 3.0   # COG range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
   variables:
     precip:
       native_name: precip
@@ -766,6 +780,8 @@ obs/chirps-v2-daily:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/netcdf/p05/"
   file_pattern: "chirps-v2.0.{year}.days_p05.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent multi-GiB downloads
   variables:
     precip:
       native_name: precip
@@ -784,6 +800,8 @@ obs/chirps-v2-pentad:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_pentad/netcdf/"
   file_pattern: "chirps-v2.0.{year}.pentads.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent multi-GiB downloads
   variables:
     precip:
       native_name: precip
@@ -802,6 +820,8 @@ obs/chirps-v2-dekad:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_dekad/netcdf/"
   file_pattern: "chirps-v2.0.{year}.dekads.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent multi-GiB downloads
   variables:
     precip:
       native_name: precip
@@ -820,6 +840,7 @@ obs/chirps-v2-annual:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_annual/tifs/"
   file_pattern: "chirps-v2.0.{year}.tif"
   format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
   variables:
     precip:
       native_name: precip
@@ -839,6 +860,7 @@ obs/chirps-v3-monthly:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/"
   file_pattern: "chirps-v3.0.{year}.{month:02d}.cog"
   format: cog
+  request_interval: 3.0   # COG range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
   variables:
     precip:
       native_name: precip
@@ -857,6 +879,8 @@ obs/chirps-v3-daily:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/sat/netcdf/byYear/"
   file_pattern: "chirps-v3.0.sat.{year}.days_p05.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent ~23.5 GiB/file downloads
   variables:
     precip:
       native_name: precip
@@ -875,6 +899,8 @@ obs/chirps-v3-pentad:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/pentads/global/netcdf/"
   file_pattern: "chirps-v3.0.{year}.pentads.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent multi-GiB downloads
   variables:
     precip:
       native_name: precip
@@ -893,6 +919,8 @@ obs/chirps-v3-dekad:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/dekads/global/netcdf/"
   file_pattern: "chirps-v3.0.{year}.dekads.nc"
   format: netcdf
+  request_interval: 1.0   # whole-file pulls: light pacing
+  max_workers: 2          # cap concurrent multi-GiB downloads
   variables:
     precip:
       native_name: precip
@@ -911,6 +939,7 @@ obs/chirps-v3-annual:
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/annual/global/tifs/"
   file_pattern: "chirps-v3.0.{year}.tif"
   format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
   variables:
     precip:
       native_name: precip

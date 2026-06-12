@@ -99,6 +99,25 @@ def test_v3_daily_rhiza_documents_coverage_floor():
 
 
 @pytest.mark.parametrize("prod", NATIVE)
+def test_native_chirps_declare_request_interval(prod):
+    """Native UCSB CHIRPS entries hit data.chc.ucsb.edu, which CrowdSec-bans an IP
+    that exceeds ~2 req/s (4-hour 403). Each native entry must declare a positive
+    request_interval floor so multi-file pulls are paced by default."""
+    ri = catalog.info(prod).get("request_interval")
+    assert isinstance(ri, (int, float)) and ri > 0, \
+        f"{prod} must declare a request_interval throttle floor"
+
+
+@pytest.mark.parametrize("prod", [p for p in NATIVE if NATIVE_FORMAT[p.rsplit("-", 1)[1]] == "netcdf"])
+def test_native_chirps_netcdf_cap_concurrent_connections(prod):
+    """The per-year NetCDF products download whole files (some many GiB) in
+    parallel; they must cap concurrent connections via max_workers."""
+    mw = catalog.info(prod).get("max_workers")
+    assert isinstance(mw, int) and 1 <= mw <= 8, \
+        f"{prod} must cap concurrent connections with max_workers in 1..8"
+
+
+@pytest.mark.parametrize("prod", NATIVE)
 def test_native_config_health_ok(prod):
     from rosetta.adapters import get_adapter
     e = catalog.info(prod)
