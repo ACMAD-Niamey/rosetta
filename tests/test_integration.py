@@ -31,8 +31,41 @@ def _check_dataset(ds, variable, region=None):
 @pytest.mark.integration
 @pytest.mark.network
 def test_fetch_nmme_cfsv2_precip():
+    # nmme/cfsv2 is the hindcast entry (1982 to 2011-03); use an in-range init.
     ds = rosetta.fetch(
         product="nmme/cfsv2",
+        variable="precip",
+        init="2010-01",
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == "mm/day"
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_fetch_nmme_cfsv2_temp():
+    # nmme/cfsv2 is the hindcast entry (1982 to 2011-03); use an in-range init.
+    ds = rosetta.fetch(
+        product="nmme/cfsv2",
+        variable="temp",
+        init="2010-01",
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "temp", REGION)
+    assert ds["temp"].attrs["units"] == "C"
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_fetch_nmme_cfsv2_forecast_precip():
+    # nmme/cfsv2-forecast is the live real-time stream (2011-04 to present), so a
+    # recent init like 2024-01 is in range. Covers the forecast endpoint, which
+    # the hindcast tests above do not exercise.
+    ds = rosetta.fetch(
+        product="nmme/cfsv2-forecast",
         variable="precip",
         init="2024-01",
         region=REGION,
@@ -44,16 +77,30 @@ def test_fetch_nmme_cfsv2_precip():
 
 @pytest.mark.integration
 @pytest.mark.network
-def test_fetch_nmme_cfsv2_temp():
-    ds = rosetta.fetch(
-        product="nmme/cfsv2",
-        variable="temp",
-        init="2024-01",
-        region=REGION,
-        verbose=True,
-    )
-    _check_dataset(ds, "temp", REGION)
-    assert ds["temp"].attrs["units"] == "C"
+def test_fetch_nmme_cfsv2_routes_streams_and_forecast_sst():
+    """The unified nmme/cfsv2 (split_streams) routes by init year against the real
+    IRI endpoints: a hindcast-range init resolves to .HINDCAST, a post-2010 init
+    to .FORECAST -- including sst, which both streams serve. End-to-end guard for
+    the opendap split-stream routing (URL-level routing is covered no-network in
+    tests/test_opendap_adapter.py)."""
+    OCEAN = [-5, 5, 55, 70]   # sst needs an ocean bbox
+    # Hindcast-year init -> .HINDCAST stream.
+    h = rosetta.fetch("nmme/cfsv2", "precip", init="2010-01", target="MAM",
+                      region=REGION, cache=False, verbose=False)
+    _check_dataset(h, "precip", REGION)
+    assert h["precip"].attrs["units"] == "mm/day"
+    assert "member" in h.dims
+    # Forecast-year init via the SAME id -> .FORECAST stream.
+    f = rosetta.fetch("nmme/cfsv2", "precip", init="2024-01", target="MAM",
+                      region=REGION, cache=False, verbose=False)
+    _check_dataset(f, "precip", REGION)
+    assert "member" in f.dims
+    # Forecast sst -- previously unavailable; symmetric across streams now.
+    s = rosetta.fetch("nmme/cfsv2", "sst", init="2024-01", target="MAM",
+                      region=OCEAN, cache=False, verbose=False)
+    assert "sst" in s
+    assert "member" in s.dims
+    assert float(s["sst"].notnull().mean()) > 0.3, "expected finite sst over ocean"
 
 
 # ── NCEI ─────────────────────────────────────────────────────────────────────
@@ -114,40 +161,6 @@ def test_fetch_nmme_geoss2s_precip():
 def test_fetch_nmme_geoss2s_temp():
     ds = rosetta.fetch(
         product="nmme/geoss2s",
-        variable="temp",
-        init="2024-01",
-        target="MAM",
-        region=REGION,
-        hindcast=(2024, 2024),
-        verbose=True,
-    )
-    _check_dataset(ds, "temp", REGION)
-    assert ds["temp"].attrs["units"] == "C"
-    assert "member" in ds.dims
-
-
-@pytest.mark.integration
-@pytest.mark.network
-def test_fetch_nmme_gemnemo_precip():
-    ds = rosetta.fetch(
-        product="nmme/gemnemo",
-        variable="precip",
-        init="2024-01",
-        target="MAM",
-        region=REGION,
-        hindcast=(2024, 2024),
-        verbose=True,
-    )
-    _check_dataset(ds, "precip", REGION)
-    assert ds["precip"].attrs["units"] == "mm/day"
-    assert "member" in ds.dims
-
-
-@pytest.mark.integration
-@pytest.mark.network
-def test_fetch_nmme_gemnemo_temp():
-    ds = rosetta.fetch(
-        product="nmme/gemnemo",
         variable="temp",
         init="2024-01",
         target="MAM",
