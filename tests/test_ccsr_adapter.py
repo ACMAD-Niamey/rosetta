@@ -4,7 +4,8 @@ The Columbia CCSR site replaced the sunset IRI Data Library. It serves the
 NMME models (SPEAR, CanSIPS-IC4, ...) over plain OPeNDAP with a different
 convention from IRI:
   - the variable is part of the path (no Ingrid `/.<var>/dods` suffix)
-  - S (init) and target are "hours since 1960-01-01" (not "months since")
+  - S (init) and target are a CF "<unit> since 1960-01-01" axis; most models
+    use "hours since", but some (SPEAR, CanSIPS-IC4) use "days since"
   - L is an integer 0..11 lead (L=0 == the init month), with a self-describing
     `target[S,L]` variable giving each (init, lead)'s target month
   - longitude is 0..360
@@ -119,6 +120,73 @@ def test_health_check_config_and_missing_url():
     assert ok["healthy"] is True and ok["kind"] == "config"
     bad = a.health_check({"variables": {}}, probe_remote=False)
     assert bad["healthy"] is False
+
+
+def test_decode_time_since_handles_hours_days_and_months():
+    """Regression: the CCSR server serves different models with different time
+    units. Most use 'hours since 1960-01-01' (IRI convention), but SPEAR and
+    CanSIPS-IC4 use 'days since 1960-01-01'. The decoder must handle both (plus
+    months) rather than assuming hours."""
+    from rosetta.adapters.ccsr import _decode_time_since
+
+    hours = _decode_time_since("hours since 1960-01-01", np.array([0, 24, 48]))
+    assert hours.astype("datetime64[D]")[2] == np.datetime64("1960-01-03")
+
+    days = _decode_time_since("days since 1960-01-01", np.array([0, 31, 60]))
+    assert days.astype("datetime64[D]")[1] == np.datetime64("1960-02-01")
+
+    months = _decode_time_since("months since 1960-01-01", np.array([0, 1, 12]))
+    assert months.astype("datetime64[M]")[2] == np.datetime64("1961-01")
+
+    with pytest.raises(ValueError, match="since"):
+        _decode_time_since("parsecs since 1960-01-01", np.array([0]))
+
+
+def _capture_url(monkeypatch):
+    """Patch the adapter's xr.open_dataset to record the opened URL and return a
+    synthetic CCSR dataset, so URL routing can be tested without network."""
+    from rosetta.adapters import ccsr as ccsr_mod
+    captured = {}
+
+    def fake_open(url, **kwargs):
+        captured["url"] = url
+        return _synthetic_ccsr(native="prcp")
+
+    monkeypatch.setattr(ccsr_mod.xr, "open_dataset", fake_open)
+    return captured
+
+
+def test_split_streams_routes_to_forecast_or_hindcast(monkeypatch):
+    """split_streams entries pick the forecast/ vs hindcast/ subdir from the
+    requested years (past the hindcast range -> forecast)."""
+    from rosetta.adapters.ccsr import CCSRAdapter
+    captured = _capture_url(monkeypatch)
+    cfg = {
+        "adapter": "ccsr", "split_streams": True,
+        "source_url": "https://x/NMME/NOAA-GFDL/SPEAR",
+        "variables": {"precip": {"native_name": "prcp", "units": "mm", "target_units": "mm"}},
+        "grid": {"hindcast_range": [1991, 2020]},
+        "init_months": [2], "_verbose": False,
+    }
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2012, 2013), region=None)
+    assert captured["url"].endswith("/NOAA-GFDL/SPEAR/hindcast/prcp")
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2026, 2026), region=None)
+    assert captured["url"].endswith("/NOAA-GFDL/SPEAR/forecast/prcp")
+
+
+def test_combined_stream_has_no_subdir(monkeypatch):
+    """Without split_streams (CCSM4), the variable hangs directly off the base url."""
+    from rosetta.adapters.ccsr import CCSRAdapter
+    captured = _capture_url(monkeypatch)
+    cfg = {
+        "adapter": "ccsr",
+        "source_url": "https://x/NMME/COLA-RSMAS/CCSM4",
+        "variables": {"precip": {"native_name": "prcp", "units": "mm", "target_units": "mm"}},
+        "grid": {"hindcast_range": [1982, 2026]},
+        "init_months": [2], "_verbose": False,
+    }
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2012, 2013), region=None)
+    assert captured["url"].endswith("/COLA-RSMAS/CCSM4/prcp")
 
 
 @pytest.mark.integration

@@ -9,6 +9,7 @@ Live CDS fetches for this product live in tests/test_integration.py.
 """
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from rosetta import catalog
@@ -110,4 +111,10 @@ def test_normalize_precip_metres_to_mm_per_day():
 def test_normalize_temp_kelvin_to_celsius():
     out = normalize(_synthetic_era5_land(), catalog.info(PRODUCT), "temp")
     assert out["temp"].attrs["units"] == "C"
-    np.testing.assert_allclose(float(out["temp"].mean()), 26.85, atol=0.01)
+    # The converted field is uniform 26.85 C (min == max). Aggregate in float64:
+    # under numpy 2.x scalar promotion the K->C result stays float32, and a
+    # float32 mean over the ~180k-cell grid accumulates enough rounding error to
+    # drift past a 0.01 tolerance even though every cell is exact.
+    assert float(out["temp"].min()) == pytest.approx(26.85, abs=0.01)
+    assert float(out["temp"].max()) == pytest.approx(26.85, abs=0.01)
+    np.testing.assert_allclose(float(out["temp"].astype("float64").mean()), 26.85, atol=0.01)

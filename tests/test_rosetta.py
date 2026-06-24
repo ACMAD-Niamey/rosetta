@@ -747,6 +747,25 @@ def test_health_check_non_deprecated_no_warning():
     assert len(deprecation_warnings) == 0
 
 
+def test_cfsv2_use_emits_clear_deprecation_warning():
+    """Resolving nmme/cfsv2 (the fetch path goes through catalog.get) must emit a
+    clear DeprecationWarning at the point of use, not just in a health check. The
+    message explains the IRIDL sunset risk. There is deliberately no successor
+    wired (SFS has no public feed yet), so the warning must not point at one."""
+    import warnings
+    from rosetta import catalog
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        catalog.info("nmme/cfsv2")
+    deps = [x for x in w if issubclass(x.category, DeprecationWarning)]
+    assert deps, "expected a DeprecationWarning when resolving nmme/cfsv2"
+    msg = str(deps[0].message)
+    assert "deprecated" in msg.lower()
+    assert "sunset" in msg.lower(), f"warning should explain the sunset risk: {msg}"
+    assert "IRI" in msg, f"warning should name the IRI Data Library source: {msg}"
+    assert "sfs" not in msg.lower(), f"no successor should be referenced: {msg}"
+
+
 # ---------------------------------------------------------------------------
 # 10. Placeholder entries
 # ---------------------------------------------------------------------------
@@ -767,7 +786,7 @@ def test_c3s_entries_have_sst():
 
 def test_ncei_entries_have_sst():
     from rosetta import catalog
-    for product in ["nmme/ccsm4", "nmme/geoss2s", "nmme/gemnemo"]:
+    for product in ["nmme/ccsm4", "nmme/geoss2s"]:
         cfg = catalog.info(product)
         assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
         assert cfg["variables"]["sst"]["native_name"] == "sst"

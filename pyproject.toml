@@ -17,6 +17,14 @@ dependencies = [
     "nuthatch>=0.4.9",
     "cfgrib>=0.9.15.1",
     "eccodeslib>=2.46.2.19",
+    # icechunk (versioned Zarr stores) is a default dep so the icechunk adapter
+    # never fails lazily at fetch time. It requires zarr>=3. sheerwater's
+    # metadata hard-pins zarr==2.18.3, but that pin is stale -- sheerwater reads
+    # through xarray's (version-agnostic) zarr backend and opens+reads its public
+    # stores fine under zarr 3 (verified by tests/test_sheerwater_integration.py
+    # against real data). We force zarr>=3 past that pin via the [tool.uv]
+    # override-dependencies below so both adapters resolve into one environment.
+    "icechunk>=2",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +38,14 @@ geo = ["geopandas", "rasterio"]
 
 [project.scripts]
 rosetta = "rosetta.cli:cli"
+
+[tool.uv]
+# sheerwater's metadata hard-pins zarr==2.18.3, which blocks icechunk (needs
+# zarr>=3) from co-resolving into the same environment. That pin is stale:
+# sheerwater opens+reads its public Zarr stores correctly under zarr 3, verified
+# end-to-end against real data by tests/test_sheerwater_integration.py. Override
+# it so the icechunk and sheerwater adapters can live in one resolved env.
+override-dependencies = ["zarr>=3.1.0"]
 
 [build-system]
 requires = ["hatchling"]

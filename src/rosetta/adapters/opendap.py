@@ -24,8 +24,11 @@ class OPeNDAPAdapter(AdapterBase):
                 "probe_remote": False,
             }
 
+        # split_streams entries carry a `{stream}` placeholder; probe the hindcast
+        # endpoint (always present) so the literal braces don't reach the server.
+        probe_url = url.format(stream="HINDCAST") if product_config.get("split_streams") else url
         try:
-            ds = xr.open_dataset(url, engine="netcdf4")
+            ds = xr.open_dataset(probe_url, engine="netcdf4")
             ds.close()
             return {
                 "healthy": True,
@@ -45,7 +48,17 @@ class OPeNDAPAdapter(AdapterBase):
         verbose = product_config.get("_verbose", True)
         var_cfg = product_config["variables"][variable]
         native_name = var_cfg["native_name"]
-        url = product_config["source_url"].rstrip("/") + f"/.{native_name}/dods"
+        base = product_config["source_url"].rstrip("/")
+        # Stream routing: a split_streams entry carries a `{stream}` placeholder in
+        # its source_url; pick HINDCAST vs FORECAST from the requested years (years
+        # past the hindcast range are the live forecast, otherwise the reforecast).
+        # Mirrors the CCSR adapter's split-stream routing, for the IRI NMME models
+        # that file hindcast and forecast at sibling .HINDCAST/.FORECAST paths.
+        if product_config.get("split_streams"):
+            hr = (product_config.get("grid") or {}).get("hindcast_range")
+            is_forecast = bool(date_range and hr and date_range[0] > hr[1])
+            base = base.format(stream="FORECAST" if is_forecast else "HINDCAST")
+        url = base + f"/.{native_name}/dods"
         if verbose:
             print(f"[rosetta:opendap] opening remote dataset: {url}")
         ds = xr.open_dataset(url, engine="netcdf4", decode_times=False)

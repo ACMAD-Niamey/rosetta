@@ -139,14 +139,18 @@ def check_structure(ds, product, variable, product_config=None):
             "detail": f"min={vmin:.2f}, max={vmax:.2f} (expected ~{lo}..{hi})",
         }
 
-    # Member count (if catalog config provided)
+    # Member count (if catalog config provided). A model's real-time forecast and
+    # reforecast ensembles differ, so a fetched dataset's member count should match
+    # one of the two declared sizes (forecast_members or hindcast_members).
     if product_config and "grid" in product_config:
-        expected_members = product_config["grid"].get("members")
-        if expected_members and "member" in ds.dims:
+        grid = product_config["grid"]
+        expected = [n for n in (grid.get("forecast_members"),
+                                grid.get("hindcast_members")) if n]
+        if expected and "member" in ds.dims:
             actual = ds.sizes["member"]
             checks["member_count"] = {
-                "passed": actual == expected_members,
-                "detail": f"actual={actual}, expected={expected_members}",
+                "passed": actual in expected,
+                "detail": f"actual={actual}, expected one of {expected}",
             }
 
         expected_range = product_config["grid"].get("hindcast_range")

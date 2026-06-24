@@ -168,12 +168,14 @@ class TestCheckStructure:
         assert not checks["value_range"]["passed"]
 
     def test_member_count_check(self, good_gcm_ds):
-        config = {"grid": {"members": 5}}
+        # actual member count matches one of the two declared ensemble sizes
+        config = {"grid": {"forecast_members": 25, "hindcast_members": 5}}
         checks = check_structure(good_gcm_ds, "test/product", "precip", config)
         assert checks["member_count"]["passed"]
 
     def test_member_count_mismatch(self, good_gcm_ds):
-        config = {"grid": {"members": 10}}
+        # actual (5) matches neither declared size
+        config = {"grid": {"forecast_members": 10, "hindcast_members": 12}}
         checks = check_structure(good_gcm_ds, "test/product", "precip", config)
         assert not checks["member_count"]["passed"]
 

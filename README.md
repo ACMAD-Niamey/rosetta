@@ -60,7 +60,7 @@ All datasets are returned with canonical coordinate names regardless of the upst
 | Coordinate | Applies to | Description |
 |------------|-----------|-------------|
 | `lat`, `lon` | all products | Spatial axes (latitude ascending) |
-| `time` | obs/reanalysis | Monthly time axis (`datetime64`) |
+| `time` | observations / reanalysis | Monthly time axis (`datetime64`) |
 | `init_time` | forecasts | Initialization time (`datetime64`) |
 | `lead_time` | forecasts | Lead time (numeric, units vary by source) |
 | `member` | forecasts | Ensemble member index |
@@ -175,92 +175,102 @@ Each result includes `product`, `adapter`, `healthy`, `kind`, `message`, and `ch
 
 ## Data source migration
 
-IRI Data Library (ldeo.columbia.edu) sunset in April 2026. The table below maps affected Rosetta products to their successors.
+The IRI Data Library (ldeo.columbia.edu) is being sunset. Most affected NMME models moved to the Columbia CCSR successor service; the table below maps the old product ids to their canonical replacements. The old ids remain as deprecated `alias_of` stubs that resolve to the new product.
 
-| Old product | Old source | New product | New source | Status |
+| Old product(s) | Old source | New product | New source | Status |
 |---|---|---|---|---|
-| `nmme/cfsv2` | IRI DL OPeNDAP | TBD | CCSR | tracking |
-| `nmme/cfsv2-forecast` | IRI DL OPeNDAP | TBD | CCSR | tracking |
-| `nmme/ccsm4-iri` | IRI DL OPeNDAP | `nmme/ccsm4` | NCEI | migrated |
-| `nmme/geoss2s-forecast` | IRI DL OPeNDAP | `nmme/geoss2s` | NCEI | migrated |
+| `nmme/ccsm4-iri`, `nmme/ccsm4-hindcast` | IRI DL / S3 | `nmme/ccsm4` | CCSR | migrated |
+| `nmme/geoss2s-forecast`, `nmme/geoss2s-hindcast` | IRI DL / S3 | `nmme/geoss2s` | CCSR | migrated |
+| `nmme/spear-hindcast` | IRI DL | `nmme/spear` | CCSR | migrated |
+| `nmme/cansipsic4-hindcast` | IRI DL | `nmme/cansipsic4` | CCSR | migrated |
+| `nmme/cesm1-hindcast` | S3 | `nmme/cesm1` | CCSR | migrated |
 | `c3s/ecmwf-seas51c` | IRI DL (iridl adapter) | `c3s/ecmwf-monthly` | CDS | migrated |
+| `nmme/cfsv2`, `nmme/cfsv2-forecast` | IRI DL OPeNDAP | none | stays on IRI DL | deprecated, no successor |
 
-Deprecated products remain in the catalog and still function while IRI URLs respond, but `rosetta.check_product()` emits a `DeprecationWarning` indicating the successor. Use `catalog.list_products(include_deprecated=False)` to exclude them.
+CFSv2 is the exception: it is being retired from NMME and is not hosted on CCSR or any other faithful source, so it stays on the IRI Data Library as a best-effort, deprecated product until that archive goes down.
+
+Deprecated products remain in the catalog and still function while IRI URLs respond, but resolving one (via `rosetta.fetch()` or `rosetta.check_product()`) emits a `DeprecationWarning`. Use `catalog.list_products(include_deprecated=False)` to exclude them.
 
 ## Available products
 
-### C3S seasonal forecasts (CDS)
+> **How to read this.** **Hindcast** is each model's fixed reforecast period — *not* a fetch cap; real-time forecasts run past it to the present. **Forecast** is the live-verified real-time availability: `year–present` (ongoing) or **`start–end (retired)`** when the pinned C3S system version was superseded (hindcasts still fetch; no new forecasts issue). **Members (F/H)** are the real-time-forecast and reforecast ensemble sizes (they differ). `†` marks a deprecated access route. Full field conventions are documented at the top of [`src/rosetta/catalog.yaml`](src/rosetta/catalog.yaml). Deprecation aliases are omitted.
 
-| Product | Model | Frequency | Variables | Hindcast range |
-|---------|-------|-----------|-----------|----------------|
-| `c3s/ecmwf` | ECMWF SEAS51 | daily | precip, temp, sst | 1981–2016 |
-| `c3s/ecmwf-monthly` | ECMWF SEAS51 | monthly | precip, temp, sst | 1981–2016 |
-| `c3s/eccc-cansips` | ECCC CanSIPS (sys 3) | monthly | precip, temp, sst | 1981–2010 |
-| `c3s/eccc-cansipsv3` | ECCC CanSIPS (sys 4) | monthly | precip, temp, sst | 1993–2020 |
-| `c3s/meteofrance` | Météo-France (sys 9) | monthly | precip, temp, sst | 1993–2018 |
-| `c3s/cmcc` | CMCC SPSv3.5 | monthly | precip, temp, sst | 1993–2016 |
-| `c3s/dwd` | DWD GCFS 2.2 (sys 22) | monthly | precip, temp, sst | 1993–2023 |
-| `c3s/dwd-gcfs21` | DWD GCFS 2.1 (sys 21) | monthly | precip, temp, sst | 1993–2016 |
-| `c3s/ukmo` | UK Met Office (sys 604) | monthly | precip, temp, sst | 1993–2016 |
-| `c3s/jma` | JMA CPS3 (sys 3) | monthly | precip, temp, sst | 1993–2020 |
-| `c3s/jma-cps2` | JMA CPS2 (sys 2) | monthly | precip, temp, sst | 1993–2016 |
+> ⚠ **Retired-system entries.** Several C3S entries pin a `system` version whose real-time stream has ended (live-verified — a 2026 forecast init returns no data). They still fetch hindcasts, but **CMCC, JMA, and UKMO currently have no active-forecast entry** — adding entries on their current systems (CMCC SPS4, JMA CPS4, UKMO 605) is a tracked follow-up.
 
-### C3S sub-seasonal forecasts (ECDS)
+### Seasonal forecast · NMME
 
-| Product | Model | Frequency | Lead horizon | Variables | Endpoint |
-|---------|-------|-----------|--------------|-----------|----------|
-| `c3s/ecmwf-s2s` | ECMWF S2S | twice weekly (Mon/Thu) | 0–46 days | precip | ECMWF Data Store (`ecds.ecmwf.int`) |
+| Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |
+|---|---|---|---|---|---|---|---|---|
+| `nmme/cansipsic4` | ECCC CanSIPS-IC4 | Columbia CCSR | `ccsr` | precip, temp, sst | monthly | 40 / 40 | 1990–2024 | 2024–present |
+| `nmme/ccsm4` | NCAR/COLA CCSM4 | Columbia CCSR | `ccsr` | precip, temp, sst | monthly | 10 / 10 | 1982–2026 | 2014–present |
+| `nmme/cesm1` | NCAR CESM1 | Columbia CCSR | `ccsr` | precip, temp, sst | monthly | 10 / 10 | 1982–2026 | 2017–present |
+| `nmme/geoss2s` | NASA GEOS-S2S | Columbia CCSR | `ccsr` | precip, temp, sst | monthly | 4 / 4 | 1981–2017 | 2019–present |
+| `nmme/spear` | GFDL SPEAR | Columbia CCSR | `ccsr` | precip, temp, sst | monthly | 15 / 15 | 1991–2020 | 2021–present |
+| `nmme/spearb` | GFDL SPEARb | Columbia CCSR | `ccsr` | sst | monthly | 15 / 15 | 1991–2020 | 2021–present |
+| `nmme/cfsv2` † | NCEP CFSv2 | IRI Data Library | `opendap` | precip, temp, sst | monthly | 28 / 28 | 1982–2010 | 2011–present |
 
-S2S issuances are date-keyed: call with `init="YYYY-MM-DD"` (the issuance date) rather than `init="YYYY-MM"`. The catalog entry overrides `cds_url` to point at the ECMWF Data Store, which is a separate service from the Copernicus CDS — see [ECMWF Data Store (ECDS) setup](#ecmwf-data-store-ecds-setup) for credentials and licence acceptance.
+### Seasonal forecast · C3S
 
-### NMME forecasts (NCEI)
+| Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |
+|---|---|---|---|---|---|---|---|---|
+| `c3s/cmcc` | CMCC SPSv3.5 (sys 35) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 50 / 40 | 1993–2016 | **2020–2025 (retired)** |
+| `c3s/cmcc-daily` | CMCC SPSv3.5 (sys 35) | Copernicus CDS | `cds` | precip, temp, sst | daily | 50 / 40 | 1993–2016 | **2020–2025 (retired)** |
+| `c3s/dwd` | DWD GCFS2.2 (sys 22) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 50 / 30 | 1993–2023 | 2023–present |
+| `c3s/dwd-daily` | DWD GCFS2.2 (sys 22) | Copernicus CDS | `cds` | precip, temp, sst | daily | 50 / 30 | 1993–2023 | 2023–present |
+| `c3s/dwd-gcfs21` | DWD GCFS2.1 (sys 21) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 50 / 30 | 1993–2019 | **2020–2025 (retired)** |
+| `c3s/eccc-cansips` | ECCC GEM5-NEMO (sys 3) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 10 / 10 | 1990–2020 | **2021–2024 (retired)** |
+| `c3s/eccc-cansipsv3` | ECCC CanESM5.1 (sys 4) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 20 / 20 | 1980–2023 | 2024–present |
+| `c3s/eccc-daily` | ECCC CanESM5.1 (sys 4) | Copernicus CDS | `cds` | precip, temp, sst | daily | 20 / 20 | 1980–2023 | 2024–present |
+| `c3s/ecmwf` | ECMWF SEAS5 (sys 51) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 51 / 25 | 1981–2016 | 2017–present |
+| `c3s/ecmwf-monthly` | ECMWF SEAS5 (sys 51) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 51 / 25 | 1981–2016 | 2017–present |
+| `c3s/jma` | JMA CPS3 (sys 3) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 155 / 10 | 1991–2020 | **2022–2026 (retired)** |
+| `c3s/jma-cps2` | JMA CPS2 (sys 2) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 13 / 10 | 1981–2016 | **2015–2022 (retired)** |
+| `c3s/meteofrance` | Météo-France Sys 9 | Copernicus CDS | `cds` | precip, temp, sst | monthly | 51 / 31 | 1993–2024 | 2025–present |
+| `c3s/meteofrance-daily` | Météo-France Sys 9 | Copernicus CDS | `cds` | precip, temp, sst | daily | 51 / 31 | 1993–2024 | 2025–present |
+| `c3s/ukmo` | UKMO GloSea6 GC3.2 (sys 604) | Copernicus CDS | `cds` | precip, temp, sst | monthly | 62 / 28 | 1993–2016 | **2025–2026 (retired)** |
+| `c3s/ukmo-daily` | UKMO GloSea6 GC3.2 (sys 604) | Copernicus CDS | `cds` | precip, temp, sst | daily | 7 / 7 | 1993–2016 | **2025–2026 (retired)** |
+| `c3s/ecmwf-seas51c` † | — | IRI Data Library | `iridl` | precip, sst | monthly | 51 / 25 | 1993–2016 | — |
 
-Daily forecast data from NCEI. Real-time forecasts only (2018+, no hindcasts from this source).
+### Sub-seasonal forecast
 
-| Product | Model | Members | Variables |
-|---------|-------|---------|-----------|
-| `nmme/ccsm4` | NCAR CCSM4 | 10 | precip, temp, sst |
-| `nmme/geoss2s` | NASA GEOS-S2S | 4 | precip, temp, sst |
-| `nmme/gemnemo` | CMC GEM-NEMO | 10 | precip, temp, sst |
+| Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |
+|---|---|---|---|---|---|---|---|---|
+| `c3s/ecmwf-s2s` | ECMWF S2S | ECMWF Data Store | `cds` | precip, sst | twice weekly | 50 / 11 | — | on-the-fly |
 
-### NMME hindcasts (S3)
+`c3s/ecmwf-s2s` is date-keyed — call with `init="YYYY-MM-DD"` (issuance date); its reforecasts are generated on-the-fly, so there is no fixed hindcast window. It uses the ECMWF Data Store (`ecds.ecmwf.int`), a separate service — see [ECMWF Data Store (ECDS) setup](#ecmwf-data-store-ecds-setup).
 
-Monthly hindcast data archived from IRI Data Library to S3 (`s3://acc.ord/nmme-hindcasts/`). No IRI dependency at runtime.
+### Reanalysis
 
-| Product | Model | Members | Leads | Hindcast range |
-|---------|-------|---------|-------|----------------|
-| `nmme/ccsm4-hindcast` | NCAR CCSM4 | 10 | 12 | 1982–2020 |
-| `nmme/geoss2s-hindcast` | NASA GEOS-S2S | 10 | 9 | 1981–2020 |
-| `nmme/gemnemo-hindcast` | CMC GEM-NEMO | 10 | 12 | 1982–2020 |
-| `nmme/cesm1-hindcast` | NCAR CESM1 | 10 | 12 | 1991–2020 |
-| `nmme/canesm5-hindcast` | CMC CanESM5 | 20 | 12 | 1991–2020 |
-| `nmme/gem52nemo-hindcast` | CMC GEM5.2-NEMO | 20 | 12 | 1991–2020 |
+| Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |
+|---|---|---|---|---|---|---|---|---|
+| `obs/era5` | — | Copernicus CDS | `cds` | temp, precip, sst | monthly | — | 1940–2025 | — |
+| `obs/era5-land-monthly` | — | Copernicus CDS | `cds` | precip, temp | monthly | — | 1950–2025 | — |
 
-### NMME placeholders (pending source URL)
+### Observation
 
-| Product | Model | Variables | Notes |
-|---------|-------|-----------|-------|
-| `nmme/spear` | GFDL SPEAR | precip, temp, sst | Awaiting GFDL THREDDS/NODD public path |
-| `nmme/spear-hindcast` | GFDL SPEAR | precip, temp, sst | Awaiting GFDL THREDDS/NODD public path |
-| `nmme/spearb` | GFDL SPEARb | sst | Awaiting GFDL THREDDS/NODD public path |
-| `nmme/spearb-hindcast` | GFDL SPEARb | sst | Awaiting GFDL THREDDS/NODD public path |
-| `nmme/cansipsic4` | CanSIPS-IC4 | precip, temp, sst | MSC Datamart GRIB2, needs cfgrib work |
-| `nmme/cansipsic4-hindcast` | CanSIPS-IC4 | precip, temp | Hindcast source TBD |
+| Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |
+|---|---|---|---|---|---|---|---|---|
+| `obs/chirps-live-rhiza` | — | Rhiza/Sheerwater | `sheerwater` | precip | daily | — | — | — |
+| `obs/chirps-v2-annual` | — | UCSB CHC | `http` | precip | annual | — | 1981–2024 | — |
+| `obs/chirps-v2-daily` | — | UCSB CHC | `http` | precip | daily | — | 1981–2025 | — |
+| `obs/chirps-v2-dekad` | — | UCSB CHC | `http` | precip | dekad | — | 1981–2025 | — |
+| `obs/chirps-v2-dekadal-rhiza` | — | Rhiza/Sheerwater | `sheerwater` | precip | dekadal-rolling | — | 1997–2024 | — |
+| `obs/chirps-v2-monthly` | — | UCSB CHC | `http` | precip | monthly | — | 1981–2025 | — |
+| `obs/chirps-v2-pentad` | — | UCSB CHC | `http` | precip | pentad | — | 1981–2025 | — |
+| `obs/chirps-v3-annual` | — | UCSB CHC | `http` | precip | annual | — | 1981–2025 | — |
+| `obs/chirps-v3-daily` | — | UCSB CHC | `http` | precip | daily | — | 1998–2025 | — |
+| `obs/chirps-v3-daily-rhiza` | — | Rhiza/Sheerwater | `sheerwater` | precip | daily | — | 2000–2024 | — |
+| `obs/chirps-v3-dekad` | — | UCSB CHC | `http` | precip | dekad | — | 1981–2025 | — |
+| `obs/chirps-v3-monthly` | — | UCSB CHC | `http` | precip | monthly | — | 1981–2025 | — |
+| `obs/chirps-v3-pentad` | — | UCSB CHC | `http` | precip | pentad | — | 1981–2025 | — |
+| `obs/ghcn` | — | Rhiza/Sheerwater | `sheerwater` | precip | monthly | — | 1981–2024 | — |
+| `obs/imerg` | — | Rhiza/Sheerwater | `sheerwater` | precip | monthly | — | 2000–2024 | — |
 
-### Other
-
-| Product | Source | Frequency | Variables |
-|---------|--------|-----------|-----------|
-| `nmme/cfsv2` | IRI/NMME (OPeNDAP) | monthly | precip, temp |
-| `c3s/ecmwf-seas51c` | IRI Data Library | monthly | precip |
-| `obs/chirps-v3-monthly`, `obs/chirps-v2-monthly` | UCSB (HTTP/COG) | monthly | precip |
-| `obs/chirps-{v2,v3}-{daily,pentad,dekad,annual}` | UCSB (HTTP, NetCDF/TIF) | daily–annual | precip |
-| `obs/chirps-v3-daily-rhiza`, `obs/chirps-v2-dekadal-rhiza`, `obs/chirps-live-rhiza` | Rhiza/Sheerwater (GCS Zarr, 0.25°) | daily / 10-day / live | precip |
-| `obs/era5` | CDS | monthly | temp |
+> **`nmme/cfsv2` †:** the *model* is still an active NMME member (live on CPC FTP) — only its IRI Data Library access route is deprecated (IRIDL shutdown ~Oct 2026), with no successor yet. `nmme/cfsv2-forecast` and the various `*-hindcast` ids remain as deprecated aliases.
 
 Output is always NetCDF (extensible to Zarr/GeoTIFF).
 
-Most growth should come from catalog entries and adapters, not core workflow changes. See [TODO.md](TODO.md) for planned products, storage evolution, and federated deployment roadmap.
+Most growth should come from catalog entries and adapters, not core workflow changes. Planned products, storage evolution, and the federated deployment roadmap are tracked as GitHub issues.
 
 ## CDS / ECDS setup
 

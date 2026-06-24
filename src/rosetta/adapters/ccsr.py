@@ -27,19 +27,36 @@ import xarray as xr
 
 from .base import AdapterBase
 
-_HOURS_SINCE = re.compile(r"hours\s+since\s+(\d{4})-(\d{1,2})-(\d{1,2})")
+_TIME_SINCE = re.compile(
+    r"(hours?|days?|minutes?|seconds?|months?)\s+since\s+(\d{4})-(\d{1,2})-(\d{1,2})",
+    re.IGNORECASE,
+)
+_UNIT_CODE = {"hour": "h", "day": "D", "minute": "m", "second": "s"}
 
 
-def _decode_hours_since(units: str, vals) -> np.ndarray:
-    """Decode ``hours since YYYY-MM-DD`` integer values to datetime64[h]."""
-    m = _HOURS_SINCE.search(units or "")
+def _decode_time_since(units: str, vals) -> np.ndarray:
+    """Decode CF ``<unit> since YYYY-MM-DD`` integer values to datetime64.
+
+    The CCSR/Columbia NMME server serves different models with different time
+    units: most use ``hours since 1960-01-01`` (the IRI convention), but some
+    (e.g. SPEAR, CanSIPS-IC4) use ``days since 1960-01-01``. Handles
+    hours/days/minutes/seconds/months.
+    """
+    m = _TIME_SINCE.search(units or "")
     if not m:
         raise ValueError(
-            f"CCSR adapter expected 'hours since YYYY-MM-DD' units, got {units!r}"
+            "CCSR adapter expected '<unit> since YYYY-MM-DD' units "
+            f"(hours/days/minutes/seconds/months), got {units!r}"
         )
-    y, mo, d = (int(g) for g in m.groups())
-    ref = np.datetime64(f"{y:04d}-{mo:02d}-{d:02d}", "h")
-    return ref + np.asarray(vals).astype("timedelta64[h]")
+    unit = m.group(1).lower().rstrip("s")
+    y, mo, d = (int(g) for g in m.groups()[1:])
+    vals = np.asarray(vals)
+    if unit == "month":
+        ref = np.datetime64(f"{y:04d}-{mo:02d}", "M")
+        return ref + vals.astype("timedelta64[M]")
+    code = _UNIT_CODE[unit]
+    ref = np.datetime64(f"{y:04d}-{mo:02d}-{d:02d}", code)
+    return ref + vals.astype("timedelta64[" + code + "]")
 
 
 def _months_of(dt64: np.ndarray) -> np.ndarray:
@@ -62,15 +79,24 @@ class CCSRAdapter(AdapterBase):
     def fetch_data(self, product_config, variable, date_range=None, region=None):
         var_cfg = product_config["variables"][variable]
         native = var_cfg["native_name"]
-        url = product_config["source_url"].rstrip("/") + f"/{native}"
+        base = product_config["source_url"].rstrip("/")
+        # Stream routing: some CCSR models split into forecast/ and hindcast/
+        # subdirectories (split_streams: true), others serve one combined series.
+        # For split models, pick the subdir from the requested years: years past
+        # the hindcast range are the live forecast, otherwise the reforecast.
+        if product_config.get("split_streams"):
+            hr = (product_config.get("grid") or {}).get("hindcast_range")
+            is_forecast = bool(date_range and hr and date_range[0] > hr[1])
+            base = f"{base}/{'forecast' if is_forecast else 'hindcast'}"
+        url = f"{base}/{native}"
         if product_config.get("_verbose", True):
             print(f"[rosetta:ccsr] opening remote dataset: {url}")
         ds = xr.open_dataset(url, engine="netcdf4", decode_times=False)
         return self._process(ds, native, product_config, date_range, region)
 
     def _process(self, ds, native, config, date_range=None, region=None):
-        # ---- decode S (hours since 1960) and filter by year + init month ----
-        s_dt = _decode_hours_since(ds["S"].attrs.get("units", ""), ds["S"].values)
+        # ---- decode S (time since 1960) and filter by year + init month ----
+        s_dt = _decode_time_since(ds["S"].attrs.get("units", ""), ds["S"].values)
         ds = ds.assign_coords(S=("S", s_dt))
 
         s_years = ds["S"].dt.year.values
@@ -89,8 +115,8 @@ class CCSRAdapter(AdapterBase):
         target_months = _target_months(config)
         if (target_months and "target" in ds.variables
                 and "L" in ds.dims and ds.sizes["S"] > 0):
-            tgt_dt = _decode_hours_since(ds["target"].attrs.get("units", ""),
-                                         ds["target"].values)         # (S, L)
+            tgt_dt = _decode_time_since(ds["target"].attrs.get("units", ""),
+                                        ds["target"].values)          # (S, L)
             tgt_month = _months_of(tgt_dt)                             # (S, L)
             # All retained inits share the init month, so the lead→target-month
             # mapping is identical across S; read it off the first init.

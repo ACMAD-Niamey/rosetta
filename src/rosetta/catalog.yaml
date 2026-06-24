@@ -1,7 +1,34 @@
+# rosetta product catalog.
+#
+# Coverage/ensemble field conventions (under each product's `grid:`):
+#
+#   hindcast_range: [start_year, end_year]
+#     The model's REFORECAST (hindcast) period — the fixed historical window of
+#     retrospective forecasts, a property of the model/system. It is NOT a data
+#     cap: real-time forecasts run past it to the present, and NOTHING in rosetta
+#     uses this field to limit a fetch. For nmme/* split-stream models it doubles
+#     as the hindcast<->forecast routing boundary; for c3s/* it is descriptive
+#     metadata; for observations/reanalysis (obs/*) it denotes data coverage.
+#     `null` means there is no fixed window (rolling live feeds, on-the-fly S2S).
+#
+#   forecast_range: [start_year, end_year_or_null]
+#     The REAL-TIME forecast availability for the pinned system. A `null` end means
+#     the stream is ongoing (forecasts to the present); a year means the stream
+#     ENDED then — the pinned C3S system version was retired/superseded, so
+#     hindcasts still fetch but no NEW forecasts are issued. Absent for
+#     observations/reanalysis and the on-the-fly S2S reforecast.
+#
+#   forecast_members / hindcast_members:
+#     Ensemble sizes for the real-time forecast and the reforecast respectively —
+#     many systems run a larger ensemble in real time than in the hindcast.
+#     Observations/reanalysis have neither.
+#
 nmme/cfsv2:
   adapter: opendap
+  split_streams: true
   deprecated_after: "2026-04-30"
   successor: null
+  deprecation_note: "The faithful NMME CFSv2 reforecast lives only on the IRI Data Library, which is being sunset, so this entry is best-effort and may stop working once IRIDL shuts down. As of 2026-06 it remains the only source of the genuine NMME CFSv2 data (hindcast 1982-2011, real-time forecast still updating)."
   # NOTE: This uses PENTAD_SAMPLES/.MONTHLY which returns 28 members and all
   # 10 lead months per init.  When rosetta.fetch() is called with init= and
   # target=, the OPeNDAP adapter automatically selects and averages only the
@@ -13,7 +40,13 @@ nmme/cfsv2:
   # causing r(DS_gcm, IRI_gcm) < 1 and reduced cross-pipeline CCA agreement.
   # TODO: Switch source_url to PENTAD_SAMPLES_FULL once the OPeNDAP adapter
   # supports the required server-side lead + member averaging for that endpoint.
-  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.HINDCAST/.PENTAD_SAMPLES/.MONTHLY"
+  # split_streams: the {stream} placeholder resolves to HINDCAST for in-range
+  # years and FORECAST past hindcast_range[1]. The two streams are structurally
+  # identical -- same 28 members, L=0.5..9.5 leads, 1deg global grid, and units
+  # (verified against the live endpoints) -- so this is one dataset split only by
+  # period. NB the real split is mid-2011 (hindcast runs to ~2011-03, forecast
+  # from 2011-04); routing is by year, so a 2011 init resolves to FORECAST.
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.{stream}/.PENTAD_SAMPLES/.MONTHLY"
   variables:
     precip:
       native_name: prec
@@ -30,215 +63,46 @@ nmme/cfsv2:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 28  # PENTAD_SAMPLES/.MONTHLY returns 28 members (not 24)
+    forecast_members: 28
+    hindcast_members: 28
     hindcast_range: [1982, 2010]
+    forecast_range: [2011, null]   # real-time, ongoing (model active; this IRIDL route is the deprecated part)
 
 nmme/cfsv2-forecast:
-  adapter: opendap
-  deprecated_after: "2026-04-30"
-  successor: null
-  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.FORECAST/.PENTAD_SAMPLES/.MONTHLY"
-  variables:
-    precip:
-      native_name: prec
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: tref
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 28
-    hindcast_range: null  # forecast only, 2011-present
+  alias_of: "nmme/cfsv2"   # deprecated: forecast is the same product, forecast stream
 
 # CCSM4 via IRI OPeNDAP (combined hindcast + forecast, 1982-present)
 nmme/ccsm4-iri:
-  adapter: opendap
-  deprecated_after: "2026-04-30"
-  successor: "nmme/ccsm4"
-  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.COLA-RSMAS-CCSM4/.MONTHLY"
-  variables:
-    precip:
-      native_name: prec
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: tref
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: [1982, 2026]
+  alias_of: "nmme/ccsm4"   # deprecated: IRI DL route superseded by the CCSR route
 
-# GEOSS2S forecast via IRI OPeNDAP (2017-present, 10 members)
 nmme/geoss2s-forecast:
-  adapter: opendap
-  deprecated_after: "2026-04-30"
-  successor: "nmme/geoss2s"
-  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NASA-GEOSS2S/.FORECAST/.MONTHLY"
-  variables:
-    precip:
-      native_name: prec
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: tref
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: null  # forecast only, 2017-present
-
-# NMME hindcasts archived on S3 (downloaded from IRI Data Library)
-# One file per init time, contains all members/leads for precip + temp
+  alias_of: "nmme/geoss2s"   # deprecated: IRI DL forecast route superseded by CCSR
 
 nmme/ccsm4-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/ccsm4"
-  file_template: "ccsm4_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: [1982, 2020]
-
-nmme/gemnemo-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/gemnemo"
-  file_template: "gemnemo_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: [1982, 2020]
+  alias_of: "nmme/ccsm4"   # deprecated: S3 hindcast superseded by the CCSR route
 
 nmme/cesm1-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/cesm1"
-  file_template: "cesm1_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: [1991, 2020]
-
-nmme/canesm5-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/canesm5"
-  file_template: "canesm5_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 20
-    hindcast_range: [1991, 2020]
-
-nmme/gem52nemo-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/gem52nemo"
-  file_template: "gem52nemo_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 20
-    hindcast_range: [1991, 2020]
+  alias_of: "nmme/cesm1"   # deprecated: S3 hindcast superseded by the CCSR route
 
 nmme/geoss2s-hindcast:
-  adapter: s3
-  s3_bucket: "acc.ord"
-  s3_prefix: "nmme-hindcasts/geoss2s"
-  file_template: "geoss2s_{year}-{month}.nc"
-  variables:
-    precip:
-      native_name: precip
-      units: "mm/day"
-      target_units: "mm/day"
-    temp:
-      native_name: temp
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: [1982, 2020]
+  alias_of: "nmme/geoss2s"   # deprecated: S3 hindcast superseded by the CCSR route
 
-# NCEI NMME archive — ccsm4 / geoss2s / gemnemo (2018+ only, no hindcasts).
-# PROVENANCE: archive. NOAA NCEI re-hosts NMME output; it is an archive, not the
-# producing center (NCAR/COLA, NASA-GMAO, ECCC). Used because these older models
-# have no convenient live producing-center feed. Same provenance class as the
-# CCSR entries below; see the SPEAR block for the original-vs-mirror rationale.
-# https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/
+# CCSR (Columbia) NMME — the IRI Data Library successor. One canonical product
+# per model (no -hindcast / -forecast / -iri / -ncei split); the source and the
+# hindcast-vs-forecast stream are catalog/adapter details, not part of the id.
+# CCSM4 serves one combined hindcast+forecast series; GEOSS2S/SPEAR/CanSIPS-IC4
+# split into forecast/ and hindcast/ subdirs (split_streams: true).
 
 nmme/ccsm4:
-  adapter: ncei
-  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/ccsm4"
-  file_regex: "{var}_day_ccsm4_{init}_{member}_.*\\.nc"
-  member_list: ["r1i1p1", "r2i1p1", "r3i1p1", "r4i1p1", "r5i1p1",
-                "r6i1p1", "r7i1p1", "r8i1p1", "r9i1p1", "r10i1p1"]
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CCSM4"
   variables:
     precip:
-      native_name: pr
-      units: "m/s"
-      target_units: "mm/day"
+      native_name: prcp
+      units: mm
+      target_units: mm
     temp:
-      native_name: tasmax
-      short_name: TREFMXAV
+      native_name: t2m
       units: K
       target_units: C
     sst:
@@ -248,22 +112,48 @@ nmme/ccsm4:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 10
-    hindcast_range: null
+    forecast_members: 10
+    hindcast_members: 10
+    hindcast_range: [1982, 2026]
+    forecast_range: [2014, null]   # real-time, ongoing
+
+# CESM1 (COLA-RSMAS): combined hindcast+forecast like CCSM4. Migrated from the
+# acc.ord S3 archive (nmme/cesm1-hindcast, now a deprecated alias) to CCSR.
+nmme/cesm1:
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CESM1"
+  variables:
+    precip:
+      native_name: prcp
+      units: mm
+      target_units: mm
+    temp:
+      native_name: t2m
+      units: K
+      target_units: C
+    sst:
+      native_name: sst
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    forecast_members: 10
+    hindcast_members: 10
+    hindcast_range: [1982, 2026]
+    forecast_range: [2017, null]   # real-time, ongoing (start approx)
 
 nmme/geoss2s:
-  adapter: ncei
-  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/geos-5"
-  file_regex: "{var}_daily_geos-5\\.{init}09_{member}_.*\\.nc"
-  member_list: ["E1", "E2", "E3", "E4"]
-  time_fix: "geos5_year"
+  adapter: ccsr
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NASA-GMAO/GEOSS2S"
+  split_streams: true
   variables:
     precip:
-      native_name: pr
-      units: "kg m-2 s-1"
-      target_units: "mm/day"
+      native_name: prcp
+      units: mm
+      target_units: mm
     temp:
-      native_name: tasmax
+      native_name: t2m
       units: K
       target_units: C
     sst:
@@ -273,32 +163,10 @@ nmme/geoss2s:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 4
-    hindcast_range: null
-
-nmme/gemnemo:
-  adapter: ncei
-  source_url: "https://www.ncei.noaa.gov/data/north-american-multi-model-ensemble/access/gemnemo"
-  file_regex: "{var}_daily_gemnemo\\.{init}_{member}_.*\\.nc"
-  member_list: ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10"]
-  variables:
-    precip:
-      native_name: pr
-      units: "kg m-2 s-1"
-      target_units: "mm/day"
-    temp:
-      native_name: tasmax
-      units: K
-      target_units: C
-    sst:
-      native_name: sst
-      units: K
-      target_units: K
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 10
-    hindcast_range: null
+    forecast_members: 4
+    hindcast_members: 4
+    hindcast_range: [1981, 2017]
+    forecast_range: [2019, null]   # real-time, ongoing
 
 # --- c3s/* : Copernicus Climate Data Store (CDS) seasonal systems ---
 # PROVENANCE: original. The CDS is the official distribution channel for these
@@ -330,8 +198,10 @@ c3s/ecmwf:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 51
+    forecast_members: 51
+    hindcast_members: 25
     hindcast_range: [1981, 2016]
+    forecast_range: [2017, null]   # real-time, ongoing (verified)
 
 c3s/eccc-cansips:
   adapter: cds
@@ -358,8 +228,10 @@ c3s/eccc-cansips:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 10
-    hindcast_range: [1981, 2010]
+    forecast_members: 10
+    hindcast_members: 10
+    hindcast_range: [1990, 2020]   # ECCC GEM5-NEMO (C3S system 3) native reforecast
+    forecast_range: [2021, 2024]   # RETIRED — superseded by CanESM5.1 (sys 4, see c3s/eccc-cansipsv3)
 
 c3s/eccc-cansipsv3:
   adapter: cds
@@ -386,8 +258,10 @@ c3s/eccc-cansipsv3:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 20
-    hindcast_range: [1993, 2020]
+    forecast_members: 20
+    hindcast_members: 20
+    hindcast_range: [1980, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast
+    forecast_range: [2024, null]   # real-time, ongoing (verified)
 
 c3s/meteofrance:
   adapter: cds
@@ -414,8 +288,10 @@ c3s/meteofrance:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 31
-    hindcast_range: [1993, 2018]
+    forecast_members: 51
+    hindcast_members: 31
+    hindcast_range: [1993, 2024]   # Meteo-France System 9 native reforecast
+    forecast_range: [2025, null]   # real-time, ongoing (verified)
 
 c3s/cmcc:
   adapter: cds
@@ -442,8 +318,10 @@ c3s/cmcc:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 40
+    forecast_members: 50
+    hindcast_members: 40
     hindcast_range: [1993, 2016]
+    forecast_range: [2020, 2025]   # RETIRED — superseded by CMCC SPS4 (sys 4); hindcasts still fetch
 
 c3s/dwd:
   adapter: cds
@@ -470,8 +348,10 @@ c3s/dwd:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 50
+    forecast_members: 50
+    hindcast_members: 30
     hindcast_range: [1993, 2023]
+    forecast_range: [2023, null]   # real-time, ongoing (verified)
 
 c3s/ukmo:
   adapter: cds
@@ -498,8 +378,10 @@ c3s/ukmo:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 28
+    forecast_members: 62   # GloSea6 lagged ensemble — verified live (2025-06 forecast: ~2/day x month)
+    hindcast_members: 28   # verified live — monthly product aggregates the lagged burst ensemble
     hindcast_range: [1993, 2016]
+    forecast_range: [2025, 2026]   # RETIRED — GloSea6 sys 604 window Mar2025-Feb2026; renumbered to 605
 
 c3s/jma:
   adapter: cds
@@ -526,8 +408,10 @@ c3s/jma:
   grid:
     lat_res: 1.25
     lon_res: 1.25
-    members: 10
-    hindcast_range: [1993, 2020]
+    forecast_members: 155  # CPS3 5/day lagged ensemble, aggregated over the month (verified live; hindcast is 10)
+    hindcast_members: 10
+    hindcast_range: [1991, 2020]   # JMA CPS3 (C3S system 3) native reforecast
+    forecast_range: [2022, 2026]   # RETIRED — CPS3 superseded by CPS4 (~Jan 2026)
 
 # Older system versions (match IRI Data Library versions)
 
@@ -556,8 +440,10 @@ c3s/jma-cps2:
   grid:
     lat_res: 1.25
     lon_res: 1.25
-    members: 5
-    hindcast_range: [1993, 2016]
+    forecast_members: 13
+    hindcast_members: 10
+    hindcast_range: [1981, 2016]   # JMA CPS2 (C3S system 2) native reforecast
+    forecast_range: [2015, 2022]   # RETIRED — CPS2 superseded by CPS3
 
 c3s/dwd-gcfs21:
   adapter: cds
@@ -584,8 +470,10 @@ c3s/dwd-gcfs21:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
-    hindcast_range: [1993, 2016]
+    forecast_members: 50
+    hindcast_members: 30
+    hindcast_range: [1993, 2019]   # DWD GCFS2.1 (C3S system 21) native reforecast
+    forecast_range: [2020, 2025]   # RETIRED — superseded by GCFS2.2 (sys 22, see c3s/dwd)
 
 # Daily (sub-monthly) CDS entries — seasonal-original-single-levels
 # These provide daily-resolution hindcasts and (where available) forecasts.
@@ -616,8 +504,10 @@ c3s/meteofrance-daily:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 31
+    forecast_members: 51
+    hindcast_members: 31
     hindcast_range: [1993, 2024]
+    forecast_range: [2025, null]   # real-time, ongoing (verified)
 
 c3s/cmcc-daily:
   adapter: cds
@@ -643,8 +533,10 @@ c3s/cmcc-daily:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 40
+    forecast_members: 50
+    hindcast_members: 40
     hindcast_range: [1993, 2016]
+    forecast_range: [2020, 2025]   # RETIRED — superseded by CMCC SPS4 (sys 4); hindcasts still fetch
 
 c3s/dwd-daily:
   adapter: cds
@@ -670,8 +562,10 @@ c3s/dwd-daily:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 30
+    forecast_members: 50
+    hindcast_members: 30
     hindcast_range: [1993, 2023]
+    forecast_range: [2023, null]   # real-time, ongoing (verified)
 
 c3s/eccc-daily:
   adapter: cds
@@ -697,8 +591,10 @@ c3s/eccc-daily:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 20
-    hindcast_range: [1993, 2023]
+    forecast_members: 20
+    hindcast_members: 20
+    hindcast_range: [1980, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast
+    forecast_range: [2024, null]   # real-time, ongoing (verified)
 
 c3s/ukmo-daily:
   adapter: cds
@@ -724,8 +620,10 @@ c3s/ukmo-daily:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 7
+    forecast_members: 7    # GloSea6 daily product: per-start ensemble (unverified — not probed)
+    hindcast_members: 7
     hindcast_range: [1993, 2016]
+    forecast_range: [2025, 2026]   # RETIRED — GloSea6 sys 604 window Mar2025-Feb2026; renumbered to 605
 
 # ---------------------------------------------------------------------------
 # CHIRPS (UCSB Climate Hazards Center precipitation)
@@ -965,7 +863,6 @@ obs/chirps-v3-daily-rhiza:
   grid:
     lat_res: 0.25
     lon_res: 0.25
-    members: null
     hindcast_range: [2000, 2024]
     temporal: daily
   notes: "Rhiza Research / Sheerwater chirps_v3 mirror (public GCS Zarr, 0.25°, daily). Coarsened from native 0.05° and only covers 2000-~mid-2024 (verified), unlike native obs/chirps-v3-* which start 1981. Was the bare obs/chirps default."
@@ -984,6 +881,7 @@ obs/chirps-v2-dekadal-rhiza:
     lat_res: 0.25
     lon_res: 0.25
     temporal: dekadal-rolling
+    hindcast_range: [1997, 2024]   # verified live: Sheerwater chirps_v2 store span
   notes: "Rhiza Research / Sheerwater chirps_v2 with agg_days=10: a 10-day ROLLING window (not calendar dekads). Used by the deepscale S2S testbed. For calendar dekads use native obs/chirps-{v2,v3}-dekad. Was obs/chirps-dekadal."
 
 # GPM IMERG Final precipitation via Sheerwater's imerg_final (public Zarr,
@@ -1001,7 +899,6 @@ obs/imerg:
   grid:
     lat_res: 0.25
     lon_res: 0.25
-    members: null
     hindcast_range: [2000, 2024]
     temporal: monthly
   notes: "GPM IMERG Final. Sheerwater-backed (public GCS Zarr, 0.25°)."
@@ -1020,7 +917,6 @@ obs/ghcn:
   grid:
     lat_res: 0.25
     lon_res: 0.25
-    members: null
     hindcast_range: [1981, 2024]
     temporal: monthly
   notes: "GHCN gauge average. Sheerwater-backed (public GCS Zarr, 0.25°). Precip only."
@@ -1051,6 +947,7 @@ obs/chirps-live-rhiza:
     lat_res: 0.05  # CHIRPS native resolution
     lon_res: 0.05
     temporal: daily
+    hindcast_range: null   # live preliminary feed (~8-day lag), rolling — no fixed historical coverage
   notes: "Rhiza Research / Sheerwater chirps_raw_live preliminary near-real-time feed (~8-day lag). Mirror of UCSB CHIRPS prelim. Was obs/chirps-live."
 
 c3s/ecmwf-monthly:
@@ -1078,8 +975,10 @@ c3s/ecmwf-monthly:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-  members: 25
-  hindcast_range: [1993, 2016]
+    forecast_members: 51
+    hindcast_members: 25
+    hindcast_range: [1981, 2016]   # ECMWF SEAS5 (C3S system 51) native reforecast
+    forecast_range: [2017, null]   # real-time, ongoing (verified)
 
 c3s/ecmwf-seas51c:
   adapter: iridl
@@ -1100,8 +999,13 @@ c3s/ecmwf-seas51c:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-  members: 25
-  hindcast_range: [1993, 2016]
+    forecast_members: 51   # SEAS5; IRI-route, deprecated
+    hindcast_members: 25
+    # NOTE: IRI-DL "SEAS51_iri2/.appended" route (deprecated; successor
+    # c3s/ecmwf-monthly). This is the IRI route's declared coverage and has NOT
+    # been verified against SEAS5's native reforecast (1981-2016) — the IRI
+    # appended route may be trimmed. Verify before relying on the start year.
+    hindcast_range: [1993, 2016]
 
 c3s/ecmwf-s2s:
   adapter: cds
@@ -1131,7 +1035,9 @@ c3s/ecmwf-s2s:
   grid:
     lat_res: 1.5
     lon_res: 1.5
-  members: 50                      # perturbed ensemble; control adds 1
+    forecast_members: 50   # S2S: 50 perturbed forecast (+control); reforecast ~11 — verify live
+    hindcast_members: 11
+    hindcast_range: null   # on-the-fly reforecast keyed to each forecast's calendar week (see note below) — no fixed window
   # Hindcast availability depends on the issuance date — ECMWF S2S provides
   # on-the-fly reforecasts for the same calendar week, not a static range.
 
@@ -1162,6 +1068,9 @@ obs/era5:
   grid:
     lat_res: 0.25
     lon_res: 0.25
+    # Reanalysis (observed), not a forecast — hindcast_range here is the data
+    # coverage. ERA5 spans 1940-present; declared through the last complete year.
+    hindcast_range: [1940, 2025]
 
 obs/era5-land-monthly:
   adapter: cds
@@ -1189,6 +1098,9 @@ obs/era5-land-monthly:
   grid:
     lat_res: 0.1
     lon_res: 0.1
+    # Reanalysis (observed) — hindcast_range is data coverage. ERA5-Land spans
+    # 1950-present; declared through the last complete year.
+    hindcast_range: [1950, 2025]
 
 # GFDL SPEAR / SPEARb (precip, temp, SST) via the Columbia CCSR successor (#14).
 #
@@ -1208,7 +1120,8 @@ obs/era5-land-monthly:
 # as SPEAR/sst (no separate SPEARb directory at CCSR).
 nmme/spear:
   adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/forecast"
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR"
+  split_streams: true
   variables:
     precip:
       native_name: prcp
@@ -1229,41 +1142,23 @@ nmme/spear:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 15
+    forecast_members: 15
+    hindcast_members: 15
     hindcast_range: [1991, 2020]
+    forecast_range: [2021, null]   # real-time, ongoing (quarterly issuance since 2025)
 
 nmme/spear-hindcast:
-  adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/hindcast"
-  variables:
-    precip:
-      native_name: prcp
-      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
-      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
-      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
-      # scale-invariant, so this does not affect §8; the label is just honest.
-      units: "mm"
-      target_units: "mm"
-    temp:
-      native_name: t2m
-      units: K
-      target_units: C
-    sst:
-      native_name: sst
-      units: K
-      target_units: K
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 15
-    hindcast_range: [1991, 2020]
+  alias_of: "nmme/spear"   # deprecated: hindcast is the same product, hindcast stream
 
-# SPEARb (SST predictor track). At CCSR the SST is served as SPEAR/sst (there is
-# no separate SPEARb directory); kept as a distinct product name for PyCPT
-# parity (PyCPT uses SPEARb.SST).
+# SPEARb (SST predictor track). At CCSR the SST is served under the SPEAR tree
+# (there is no separate SPEARb directory); kept as a distinct product name for
+# PyCPT parity (PyCPT uses SPEARb.SST). Modeled like the other split-stream
+# models: one canonical entry where split_streams: true picks the forecast/ vs
+# hindcast/ subdir from the requested years, with -hindcast a deprecated alias.
 nmme/spearb:
   adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/forecast"
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR"
+  split_streams: true
   variables:
     sst:
       native_name: sst
@@ -1272,22 +1167,13 @@ nmme/spearb:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 15
+    forecast_members: 15
+    hindcast_members: 15
     hindcast_range: [1991, 2020]
+    forecast_range: [2021, null]   # real-time, ongoing
 
 nmme/spearb-hindcast:
-  adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR/hindcast"
-  variables:
-    sst:
-      native_name: sst
-      units: K
-      target_units: K
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 15
-    hindcast_range: [1991, 2020]
+  alias_of: "nmme/spearb"   # deprecated: hindcast is the same product, hindcast stream
 
 # CanSIPS-IC4 via the Columbia CCSR successor (issue #14, #2).
 # PROVENANCE: mirror (CCSR aggregator, same as SPEAR above). The producing-center
@@ -1297,7 +1183,8 @@ nmme/spearb-hindcast:
 # Copernicus channel as c3s/eccc-cansips* — distinct distributions of the model.
 nmme/cansipsic4:
   adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4/forecast"
+  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4"
+  split_streams: true
   variables:
     precip:
       native_name: prcp
@@ -1318,27 +1205,10 @@ nmme/cansipsic4:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    members: 40
-    hindcast_range: [1991, 2020]
+    forecast_members: 40
+    hindcast_members: 40
+    hindcast_range: [1990, 2024]
+    forecast_range: [2024, null]   # real-time, ongoing
 
 nmme/cansipsic4-hindcast:
-  adapter: ccsr
-  source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4/hindcast"
-  variables:
-    precip:
-      native_name: prcp
-      # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
-      # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
-      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
-      # scale-invariant, so this does not affect §8; the label is just honest.
-      units: "mm"
-      target_units: "mm"
-    temp:
-      native_name: t2m
-      units: K
-      target_units: C
-  grid:
-    lat_res: 1.0
-    lon_res: 1.0
-    members: 40
-    hindcast_range: [1991, 2020]
+  alias_of: "nmme/cansipsic4"   # deprecated: hindcast is the same product, hindcast stream

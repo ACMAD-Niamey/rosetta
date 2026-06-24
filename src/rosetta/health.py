@@ -1,4 +1,3 @@
-import warnings
 from datetime import datetime, timezone
 
 from . import catalog
@@ -11,16 +10,9 @@ def _utc_now():
 
 def check_product(product, probe_remote=False):
     """Return health status for one catalog product."""
+    # catalog.get() resolves the config and, for deprecated/alias products,
+    # emits the DeprecationWarning (single source of truth — see catalog.info).
     config = catalog.get(product)
-
-    if config.get("deprecated"):
-        successor = config.get("successor")
-        successor_msg = f" Migrate to: {successor}." if successor else " No successor identified yet."
-        warnings.warn(
-            f"{product} is deprecated (sunset: {config['deprecated_after']}).{successor_msg}",
-            DeprecationWarning,
-            stacklevel=2,
-        )
 
     if config.get("pending_url"):
         return {
