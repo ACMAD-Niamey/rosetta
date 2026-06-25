@@ -636,6 +636,97 @@ def test_fetch_cmcc_temp():
     assert "member" in ds.dims
 
 
+# ── CMCC SPS4 (system 4) — current operational system, verified 2026-06-25 ────
+# Hindcast init 2003-11 (Nov) and the 30/50-member split were confirmed via a
+# live CDS probe. sst needs an ocean bbox.
+
+SST_OCEAN = [-5, 5, 55, 70]   # Arabian Sea
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_cmcc_sps4_precip_hindcast():
+    ds = rosetta.fetch(
+        product="c3s/cmcc-sps4",
+        variable="precip",
+        init="2003-11",
+        target="MAM",
+        region=REGION,
+        hindcast=(2003, 2003),
+        verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == "mm/day"
+    assert ds.sizes["member"] == 30
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_cmcc_sps4_sst_hindcast():
+    ds = rosetta.fetch(
+        product="c3s/cmcc-sps4",
+        variable="sst",
+        init="2003-11",
+        target="MAM",
+        region=SST_OCEAN,
+        hindcast=(2003, 2003),
+        verbose=True,
+    )
+    _check_dataset(ds, "sst", SST_OCEAN)
+    assert ds["sst"].attrs["units"] == "K"
+    assert ds.sizes["member"] == 30
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_cmcc_sps4_precip_realtime_forecast():
+    # 2025-11 is in forecast_range [2025, null]; real-time SPS4 runs 50 members.
+    ds = rosetta.fetch(
+        product="c3s/cmcc-sps4",
+        variable="precip",
+        init="2025-11",
+        target="MAM",
+        region=REGION,
+        verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds["precip"].attrs["units"] == "mm/day"
+    assert ds.sizes["member"] == 50
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+def test_fetch_cmcc_sps4_daily_precip_and_sst():
+    p = rosetta.fetch(
+        product="c3s/cmcc-sps4-daily",
+        variable="precip",
+        init="2003-11",
+        target="MAM",
+        region=REGION,
+        hindcast=(2003, 2003),
+        verbose=True,
+    )
+    _check_dataset(p, "precip", REGION)
+    assert p["precip"].attrs["units"] == "mm/day"
+    assert "member" in p.dims
+
+    s = rosetta.fetch(
+        product="c3s/cmcc-sps4-daily",
+        variable="sst",
+        init="2003-11",
+        target="MAM",
+        region=SST_OCEAN,
+        hindcast=(2003, 2003),
+        verbose=True,
+    )
+    _check_dataset(s, "sst", SST_OCEAN)
+    assert s["sst"].attrs["units"] == "K"
+
+
 @pytest.mark.integration
 @pytest.mark.network
 @pytest.mark.cds

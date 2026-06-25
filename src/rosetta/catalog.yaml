@@ -295,6 +295,9 @@ c3s/meteofrance:
 
 c3s/cmcc:
   adapter: cds
+  deprecated_after: "2025-08-01"
+  successor: "c3s/cmcc-sps4"
+  deprecation_note: "CMCC switched its C3S contribution from SPS3.5 (system 35) to SPS4 (system 4, c3s/cmcc-sps4) on 2025-08-01. SPS3.5 issues no new real-time forecasts, but its archive (hindcast 1993-2016 + forecasts through 2025) remains fetchable."
   cds_dataset: "seasonal-monthly-single-levels"
   cds_model: "cmcc"
   system: "35"
@@ -322,6 +325,39 @@ c3s/cmcc:
     hindcast_members: 40
     hindcast_range: [1993, 2016]
     forecast_range: [2020, 2025]   # RETIRED — superseded by CMCC SPS4 (sys 4); hindcasts still fetch
+
+c3s/cmcc-sps4:
+  adapter: cds
+  cds_dataset: "seasonal-monthly-single-levels"
+  cds_model: "cmcc"
+  system: "4"
+  product_type: "monthly_mean"
+  leadtime_month: [1, 2, 3, 4, 5, 6]
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tprate
+      units: "m s-1"
+      target_units: "mm/day"
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    forecast_members: 50
+    hindcast_members: 30
+    # CMCC-CM3 (SPS4), operational 2025-08-01. Nominal reforecast ref is 1993-2022
+    # (CMCC TN0301), but 30-member data is verified through 2024 in the live CDS
+    # (probe 2026-06-25); the 30->50-member real-time boundary is 2025.
+    hindcast_range: [1993, 2024]
+    forecast_range: [2025, null]   # real-time, ongoing (50 members verified)
 
 c3s/dwd:
   adapter: cds
@@ -511,6 +547,9 @@ c3s/meteofrance-daily:
 
 c3s/cmcc-daily:
   adapter: cds
+  deprecated_after: "2025-08-01"
+  successor: "c3s/cmcc-sps4-daily"
+  deprecation_note: "CMCC switched its C3S contribution from SPS3.5 (system 35) to SPS4 (system 4, c3s/cmcc-sps4-daily) on 2025-08-01. SPS3.5 issues no new real-time forecasts, but its archive (hindcast 1993-2016 + forecasts through 2025) remains fetchable."
   cds_dataset: "seasonal-original-single-levels"
   cds_model: "cmcc"
   system: "35"
@@ -537,6 +576,35 @@ c3s/cmcc-daily:
     hindcast_members: 40
     hindcast_range: [1993, 2016]
     forecast_range: [2020, 2025]   # RETIRED — superseded by CMCC SPS4 (sys 4); hindcasts still fetch
+
+c3s/cmcc-sps4-daily:
+  adapter: cds
+  cds_dataset: "seasonal-original-single-levels"
+  cds_model: "cmcc"
+  system: "4"
+  variables:
+    precip:
+      native_name: total_precipitation
+      short_name: tp
+      units: m
+      target_units: "mm/day"
+      accumulated: true
+    temp:
+      native_name: 2m_temperature
+      short_name: t2m
+      units: K
+      target_units: C
+    sst:
+      native_name: sea_surface_temperature
+      units: K
+      target_units: K
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    forecast_members: 50
+    hindcast_members: 30
+    hindcast_range: [1993, 2024]   # see c3s/cmcc-sps4; 30-member data verified through 2024 (probe 2026-06-25)
+    forecast_range: [2025, null]   # real-time, ongoing (50 members verified)
 
 c3s/dwd-daily:
   adapter: cds
