@@ -66,3 +66,45 @@ def test_no_split_streams_uses_source_url_verbatim(monkeypatch):
     }
     OPeNDAPAdapter().fetch_data(cfg, "precip", date_range=(2010, 2010), region=None)
     assert captured["url"].endswith("/.HINDCAST/.PENTAD_SAMPLES/.MONTHLY/.prec/dods")
+
+
+def _ds_for_years(years, months_init=2):
+    # S = months since 1960-01-01 for (Feb of each year)
+    s = np.array([(y - 1960) * 12 + (months_init - 1) for y in years], dtype=float)
+    lat = np.arange(-2, 3, 1.0); lon = np.arange(36, 41, 1.0)
+    data = np.zeros((len(s), len(lat), len(lon)), dtype="float32")
+    ds = xr.Dataset({"prec": (["S", "Y", "X"], data)},
+                    coords={"S": s, "Y": lat, "X": lon})
+    ds["S"].attrs["units"] = "months since 1960-01-01"
+    return ds
+
+
+def test_append_streams_concats_both_streams(monkeypatch):
+    from rosetta.adapters import opendap as opendap_mod
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    calls = []
+
+    def fake_open(url, **kw):
+        calls.append(url)
+        # hindcast URL -> 2009,2010 ; forecast URL -> 2011,2012
+        if "HINDCAST" in url:
+            return _ds_for_years([2009, 2010])
+        return _ds_for_years([2011, 2012])
+
+    monkeypatch.setattr(opendap_mod.xr, "open_dataset", fake_open)
+    cfg = dict(_SPLIT_CFG, append_streams=True)
+    out = OPeNDAPAdapter().fetch_data(cfg, "precip", date_range=(2009, 2012), region=None)
+    assert any("HINDCAST" in u for u in calls) and any("FORECAST" in u for u in calls)
+    # decoded later, but S length should be 4 (2009,2010,2011,2012)
+    assert out.sizes["S"] == 4
+
+
+def test_no_append_flag_single_stream(monkeypatch):
+    from rosetta.adapters import opendap as opendap_mod
+    from rosetta.adapters.opendap import OPeNDAPAdapter
+    calls = []
+    monkeypatch.setattr(opendap_mod.xr, "open_dataset",
+                        lambda url, **kw: calls.append(url) or _ds_for_years([2009, 2010]))
+    # spanning range but NO append_streams -> one open, hindcast only
+    OPeNDAPAdapter().fetch_data(_SPLIT_CFG, "precip", date_range=(2009, 2012), region=None)
+    assert len(calls) == 1 and "HINDCAST" in calls[0]

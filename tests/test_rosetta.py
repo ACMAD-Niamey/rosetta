@@ -204,6 +204,35 @@ def test_normalize_cf_compliance(synthetic_precip_ds):
     assert result["lon"].attrs["axis"] == "X"
 
 
+def test_year_index_reshapes_init_time_to_year(synthetic_nmme_ds):
+    from rosetta.normalize import normalize
+    config = {"variables": {"precip": {"native_name": "prec", "units": "mm/day",
+                                        "target_units": "mm/day"}}}
+    out = normalize(synthetic_nmme_ds, config, "precip", year_index=True)
+    assert "year" in out.dims and "init_time" not in out.dims
+    assert out["year"].dtype.kind == "i"
+    assert list(out["year"].values) == [2010, 2011, 2012]
+
+
+def test_year_index_default_keeps_init_time(synthetic_nmme_ds):
+    from rosetta.normalize import normalize
+    config = {"variables": {"precip": {"native_name": "prec", "units": "mm/day",
+                                        "target_units": "mm/day"}}}
+    out = normalize(synthetic_nmme_ds, config, "precip")
+    assert "init_time" in out.dims and "year" not in out.dims
+
+
+def test_year_index_preserves_units_attr(synthetic_nmme_ds):
+    """The year_index path averages over lead_time; that reduction must keep the
+    units attribute set by normalize (xarray's mean drops attrs by default), so a
+    year-indexed dataset carries the same units as the default init_time path."""
+    from rosetta.normalize import normalize
+    config = {"variables": {"precip": {"native_name": "prec", "units": "mm/day",
+                                        "target_units": "mm/day"}}}
+    out = normalize(synthetic_nmme_ds, config, "precip", year_index=True)
+    assert out["precip"].attrs.get("units") == "mm/day"
+
+
 # ---------------------------------------------------------------------------
 # 3. Storage tests
 # ---------------------------------------------------------------------------
@@ -716,8 +745,10 @@ def test_catalog_deprecated_entries():
 
 
 def test_catalog_info_deprecated():
+    # nmme/cfsv2 was de-deprecated (R5); use c3s/cmcc which retains deprecated_after+successor
+    # c3s/cmcc is deprecated, so a DeprecationWarning is expected here
     from rosetta import catalog
-    info = catalog.info("nmme/cfsv2")
+    info = catalog.info("c3s/cmcc")
     assert info["deprecated"] is True
     assert "deprecated_after" in info
     assert "successor" in info
@@ -730,10 +761,11 @@ def test_catalog_info_not_deprecated():
 
 
 def test_health_check_deprecated_emits_warning():
+    # nmme/cfsv2 was de-deprecated (R5); c3s/cmcc is still deprecated and serves as the test subject
     from rosetta import health
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        result = health.check_product("nmme/cfsv2")
+        result = health.check_product("c3s/cmcc")
     assert any("deprecated" in str(warning.message).lower() for warning in w), \
         f"Expected deprecation warning, got: {[str(x.message) for x in w]}"
 
@@ -747,23 +779,16 @@ def test_health_check_non_deprecated_no_warning():
     assert len(deprecation_warnings) == 0
 
 
-def test_cfsv2_use_emits_clear_deprecation_warning():
-    """Resolving nmme/cfsv2 (the fetch path goes through catalog.get) must emit a
-    clear DeprecationWarning at the point of use, not just in a health check. The
-    message explains the IRIDL sunset risk. There is deliberately no successor
-    wired (SFS has no public feed yet), so the warning must not point at one."""
+def test_cfsv2_use_emits_no_deprecation_warning():
+    """nmme/cfsv2 was de-deprecated in R5 (append_streams + notes replace the
+    sunset warning). Resolving it must NOT emit a DeprecationWarning."""
     import warnings
     from rosetta import catalog
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         catalog.info("nmme/cfsv2")
     deps = [x for x in w if issubclass(x.category, DeprecationWarning)]
-    assert deps, "expected a DeprecationWarning when resolving nmme/cfsv2"
-    msg = str(deps[0].message)
-    assert "deprecated" in msg.lower()
-    assert "sunset" in msg.lower(), f"warning should explain the sunset risk: {msg}"
-    assert "IRI" in msg, f"warning should name the IRI Data Library source: {msg}"
-    assert "sfs" not in msg.lower(), f"no successor should be referenced: {msg}"
+    assert not deps, f"nmme/cfsv2 is no longer deprecated; expected no DeprecationWarning but got: {[str(x.message) for x in deps]}"
 
 
 # ---------------------------------------------------------------------------
@@ -1237,3 +1262,17 @@ def test_fetch_reforecast_dispatches_to_cds_adapter(monkeypatch):
 
     assert len(cds_calls) == 1
     assert len(mars_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# R5. Catalog flags for pushdown
+# ---------------------------------------------------------------------------
+
+def test_catalog_flags_for_pushdown():
+    from rosetta import catalog
+    cfsv2 = catalog.info("nmme/cfsv2")
+    assert cfsv2.get("append_streams") is True
+    assert cfsv2.get("deprecated") is False
+    assert "deprecated_after" not in cfsv2
+    for p in ("nmme/cansipsic4", "nmme/ccsm4", "nmme/spear"):
+        assert catalog.info(p).get("single_year_fetch") is True

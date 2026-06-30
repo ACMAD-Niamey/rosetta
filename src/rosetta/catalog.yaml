@@ -26,9 +26,8 @@
 nmme/cfsv2:
   adapter: opendap
   split_streams: true
-  deprecated_after: "2026-04-30"
-  successor: null
-  deprecation_note: "The faithful NMME CFSv2 reforecast lives only on the IRI Data Library, which is being sunset, so this entry is best-effort and may stop working once IRIDL shuts down. As of 2026-06 it remains the only source of the genuine NMME CFSv2 data (hindcast 1982-2011, real-time forecast still updating)."
+  append_streams: true
+  notes: "Genuine NMME CFSv2 reforecast is currently only available via the IRI Data Library; hindcast 1982-2010 + real-time forecast are stitched via append_streams."
   # NOTE: This uses PENTAD_SAMPLES/.MONTHLY which returns 28 members and all
   # 10 lead months per init.  When rosetta.fetch() is called with init= and
   # target=, the OPeNDAP adapter automatically selects and averages only the
@@ -66,7 +65,7 @@ nmme/cfsv2:
     forecast_members: 28
     hindcast_members: 28
     hindcast_range: [1982, 2010]
-    forecast_range: [2011, null]   # real-time, ongoing (model active; this IRIDL route is the deprecated part)
+    forecast_range: [2011, null]   # real-time, ongoing. Probe-verified: HINDCAST stream ends 2011-03, FORECAST starts 2011-04; year-granular routing sends 2011 to FORECAST (captures Apr-Dec 2011; the 3 Jan-Mar 2011 reforecast-tail inits are not retrieved)
 
 nmme/cfsv2-forecast:
   alias_of: "nmme/cfsv2"   # deprecated: forecast is the same product, forecast stream
@@ -95,6 +94,7 @@ nmme/geoss2s-hindcast:
 
 nmme/ccsm4:
   adapter: ccsr
+  single_year_fetch: true
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CCSM4"
   variables:
     precip:
@@ -163,7 +163,7 @@ nmme/geoss2s:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    forecast_members: 4
+    forecast_members: 10   # real-time forecast runs a larger ensemble than the hindcast (verified live 2026-06: NASA-GMAO/GEOSS2S/forecast M=10)
     hindcast_members: 4
     hindcast_range: [1981, 2017]
     forecast_range: [2019, null]   # real-time, ongoing
@@ -1190,6 +1190,7 @@ nmme/spear:
   adapter: ccsr
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NOAA-GFDL/SPEAR"
   split_streams: true
+  single_year_fetch: true
   variables:
     precip:
       native_name: prcp
@@ -1210,7 +1211,7 @@ nmme/spear:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    forecast_members: 15
+    forecast_members: 30   # real-time forecast runs a larger ensemble than the hindcast (verified live 2026-06: NOAA-GFDL/SPEAR/forecast M=30)
     hindcast_members: 15
     hindcast_range: [1991, 2020]
     forecast_range: [2021, null]   # real-time, ongoing (quarterly issuance since 2025)
@@ -1235,7 +1236,7 @@ nmme/spearb:
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    forecast_members: 15
+    forecast_members: 30   # real-time forecast runs a larger ensemble than the hindcast (verified live 2026-06: SPEAR/forecast/sst M=30)
     hindcast_members: 15
     hindcast_range: [1991, 2020]
     forecast_range: [2021, null]   # real-time, ongoing
@@ -1253,6 +1254,7 @@ nmme/cansipsic4:
   adapter: ccsr
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/ECCC/CanSIPS-IC4"
   split_streams: true
+  single_year_fetch: true
   variables:
     precip:
       native_name: prcp

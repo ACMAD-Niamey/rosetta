@@ -26,6 +26,7 @@ import numpy as np
 import xarray as xr
 
 from .base import AdapterBase
+from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
 
 _TIME_SINCE = re.compile(
     r"(hours?|days?|minutes?|seconds?|months?)\s+since\s+(\d{4})-(\d{1,2})-(\d{1,2})",
@@ -79,20 +80,58 @@ class CCSRAdapter(AdapterBase):
     def fetch_data(self, product_config, variable, date_range=None, region=None):
         var_cfg = product_config["variables"][variable]
         native = var_cfg["native_name"]
+        verbose = product_config.get("_verbose", True)
+        max_retries = int(product_config.get("_max_retries", _DEFAULT_MAX_RETRIES))
+        retry_backoff = float(product_config.get("_retry_backoff", _DEFAULT_RETRY_BACKOFF))
         base = product_config["source_url"].rstrip("/")
-        # Stream routing: some CCSR models split into forecast/ and hindcast/
-        # subdirectories (split_streams: true), others serve one combined series.
-        # For split models, pick the subdir from the requested years: years past
-        # the hindcast range are the live forecast, otherwise the reforecast.
+        if product_config.get("single_year_fetch") and date_range:
+            y0, y1 = date_range
+            pieces = []
+            for year in range(y0, y1 + 1):
+                # Route each year independently: with single_year_fetch we open
+                # one stream per year, so the subdir must be chosen per year (a
+                # boundary-spanning range otherwise sends every year to the
+                # date_range[0] stream and silently drops the other side).
+                url = self._stream_url(base, native, product_config, (year, year))
+                if verbose:
+                    print(f"[rosetta:ccsr] opening remote dataset: {url}")
+                ds_y = _with_retry(
+                    lambda url=url: xr.open_dataset(url, engine="netcdf4", decode_times=False),
+                    max_retries, retry_backoff,
+                    label=f"CCSR open {url}", verbose=verbose,
+                )
+                ds_y = self._process(ds_y, native, product_config,
+                                     date_range=(year, year), region=region)
+                if ds_y.sizes.get("S", 0):
+                    pieces.append(ds_y)
+            if not pieces:
+                raise ValueError(f"single_year_fetch: no data for {y0}-{y1}")
+            return xr.concat(pieces, dim="S")
+        url = self._stream_url(base, native, product_config, date_range)
+        if verbose:
+            print(f"[rosetta:ccsr] opening remote dataset: {url}")
+        ds = _with_retry(
+            lambda: xr.open_dataset(url, engine="netcdf4", decode_times=False),
+            max_retries, retry_backoff,
+            label=f"CCSR open {url}", verbose=verbose,
+        )
+        return self._process(ds, native, product_config, date_range, region)
+
+    @staticmethod
+    def _stream_url(base, native, product_config, date_range):
+        """Build the variable URL, routing split_streams models to the forecast/
+        or hindcast/ subdir from the requested years.
+
+        Some CCSR models split into forecast/ and hindcast/ subdirectories
+        (split_streams: true); others serve one combined series. For split
+        models, years past hindcast_range[1] are the live forecast, otherwise the
+        reforecast.
+        """
         if product_config.get("split_streams"):
             hr = (product_config.get("grid") or {}).get("hindcast_range")
             is_forecast = bool(date_range and hr and date_range[0] > hr[1])
             base = f"{base}/{'forecast' if is_forecast else 'hindcast'}"
-        url = f"{base}/{native}"
-        if product_config.get("_verbose", True):
-            print(f"[rosetta:ccsr] opening remote dataset: {url}")
-        ds = xr.open_dataset(url, engine="netcdf4", decode_times=False)
-        return self._process(ds, native, product_config, date_range, region)
+        return f"{base}/{native}"
 
     def _process(self, ds, native, config, date_range=None, region=None):
         # ---- decode S (time since 1960) and filter by year + init month ----

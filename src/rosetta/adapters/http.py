@@ -1,19 +1,21 @@
 import os
-import random
 import re
 import tempfile
-import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import xarray as xr
 from .base import AdapterBase
+from ._robust import (
+    _DEFAULT_MAX_RETRIES,
+    _DEFAULT_RETRY_BACKOFF,
+    _RateLimiter,
+    _with_retry,
+)
 
 
 _MAX_WORKERS = 8
-_DEFAULT_MAX_RETRIES = 3
-_DEFAULT_RETRY_BACKOFF = 1.0
 
 
 def _resolve_max_workers(product_config, n_urls):
@@ -28,82 +30,6 @@ def _resolve_max_workers(product_config, n_urls):
     cap = product_config.get("max_workers")
     workers = _MAX_WORKERS if cap is None else min(_MAX_WORKERS, int(cap))
     return max(1, min(workers, n_urls))
-
-
-class _RateLimiter:
-    """Thread-safe minimum-interval gate between requests.
-
-    Used to pace per-file opens so we don't blow through a server's
-    requests-per-second budget (CHIRPS rate-limits at >~60 requests/sec when
-    GDAL/vsicurl drives many range reads in quick succession).
-    """
-
-    def __init__(self, min_interval):
-        self.min_interval = float(min_interval or 0.0)
-        self._last = 0.0
-        self._lock = threading.Lock()
-
-    def wait(self):
-        if self.min_interval <= 0:
-            return
-        with self._lock:
-            elapsed = time.monotonic() - self._last
-            if elapsed < self.min_interval:
-                time.sleep(self.min_interval - elapsed)
-            self._last = time.monotonic()
-
-
-# HTTP 4xx ("client error") responses indicate a problem with our request
-# (URL doesn't exist, unauthorized, etc.) and won't fix themselves on retry.
-# 5xx and network errors are the ones worth retrying. GDAL/rasterio and
-# urllib surface them with different wording, so we match both.
-_PERMANENT_HTTP_PATTERNS = (
-    re.compile(r"HTTP response code: 4\d{2}"),    # rasterio / vsicurl
-    re.compile(r"HTTP Error 4\d{2}"),             # urllib
-)
-
-
-def _is_transient(exc):
-    msg = str(exc)
-    for pat in _PERMANENT_HTTP_PATTERNS:
-        if pat.search(msg):
-            return False
-    return True
-
-
-def _with_retry(fn, max_retries, backoff, label, verbose=True, on_failure=None,
-                is_transient=_is_transient):
-    """Call fn(), retrying transient failures with exponential backoff + jitter.
-
-    Only retries when `is_transient(exc)` is True — by default that means
-    "anything except an HTTP 4xx response," since 4xx errors are permanent
-    (404 won't become 200 in 2 seconds). Jitter (random factor in [0.5, 1.5))
-    desynchronizes retries when many workers fail simultaneously against a
-    rate-limited server. `on_failure` runs after each failed attempt before
-    the sleep.
-    """
-    last_err = None
-    for attempt in range(max_retries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            last_err = e
-            if not is_transient(e):
-                raise
-            if attempt >= max_retries:
-                raise
-            if on_failure is not None:
-                try:
-                    on_failure()
-                except Exception:
-                    pass
-            wait = backoff * (2 ** attempt) * (0.5 + random.random())
-            if verbose:
-                print(f"[rosetta:http] {label} failed "
-                      f"(attempt {attempt + 1}/{max_retries + 1}): {e}; "
-                      f"retrying in {wait:.2f}s")
-            time.sleep(wait)
-    raise last_err  # unreachable, but keeps type-checkers honest
 
 
 def _iter(items, desc, enabled=True):
