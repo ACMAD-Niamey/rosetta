@@ -116,7 +116,7 @@ def clip_to_geometry(ds, geometry, all_touched=False):
 
 
 def normalize(ds, product_config, variable, region=None, geometry=None,
-              boundary="center"):
+              boundary="center", year_index=False):
     ds = _decode_numeric_times(ds)
 
     # ECMWF S2S GRIB files use `time` as the (scalar) init issuance and
@@ -194,5 +194,14 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
     for coord, attr in [("lat", "Y"), ("lon", "X"), ("time", "T"), ("init_time", "T")]:
         if coord in ds.coords:
             ds[coord].attrs["axis"] = attr
+
+    if year_index and "init_time" in ds.dims:
+        years = ds["init_time"].dt.year.values.astype(int)
+        ds = ds.assign_coords(init_time=years).rename({"init_time": "year"})
+        if "lead_time" in ds.dims:
+            # keep_attrs so the units attribute set above survives the reduction
+            # (xarray drops data-variable attrs on mean by default); matches the
+            # default init_time path and what validate.py relies on.
+            ds = ds.mean("lead_time", keep_attrs=True)
 
     return ds

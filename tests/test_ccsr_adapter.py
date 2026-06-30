@@ -189,6 +189,58 @@ def test_combined_stream_has_no_subdir(monkeypatch):
     assert captured["url"].endswith("/COLA-RSMAS/CCSM4/prcp")
 
 
+def test_single_year_fetch_opens_once_per_year(monkeypatch):
+    from rosetta.adapters import ccsr as ccsr_mod
+    from rosetta.adapters.ccsr import CCSRAdapter
+    opened = []
+
+    def fake_open(url, **kw):
+        opened.append(url)
+        # full multi-year dataset each call; adapter must slice per year
+        return _synthetic_ccsr(init_month=2, init_years=(1991, 1992, 1993), native="prcp")
+
+    monkeypatch.setattr(ccsr_mod.xr, "open_dataset", fake_open)
+    cfg = {
+        "adapter": "ccsr", "single_year_fetch": True,
+        "source_url": "https://x/NMME/NOAA-GFDL/SPEAR",
+        "variables": {"precip": {"native_name": "prcp", "units": "mm", "target_units": "mm"}},
+        "grid": {"hindcast_range": [1991, 2020]},
+        "init_months": [2], "_verbose": False,
+    }
+    out = CCSRAdapter().fetch_data(cfg, "precip", date_range=(1991, 1993), region=None)
+    assert len(opened) == 3                     # one open per year
+    assert out.sizes["S"] == 3                  # 3 init times concatenated
+
+
+def test_single_year_fetch_routes_each_year_to_its_own_stream(monkeypatch):
+    """A split_streams + single_year_fetch request spanning the hindcast/forecast
+    boundary must route each year to its own subdir (year > hindcast_range[1] ->
+    forecast), not pick one subdir from date_range[0] for the whole loop. The
+    boundary year's other-stream years must not be silently dropped."""
+    from rosetta.adapters import ccsr as ccsr_mod
+    from rosetta.adapters.ccsr import CCSRAdapter
+    opened = []
+
+    def fake_open(url, **kw):
+        opened.append(url)
+        # Each stream only serves its own years: hindcast has 2020, forecast 2021.
+        year = (2020,) if "hindcast" in url else (2021,)
+        return _synthetic_ccsr(init_month=2, init_years=year, native="prcp")
+
+    monkeypatch.setattr(ccsr_mod.xr, "open_dataset", fake_open)
+    cfg = {
+        "adapter": "ccsr", "split_streams": True, "single_year_fetch": True,
+        "source_url": "https://x/NMME/NOAA-GFDL/SPEAR",
+        "variables": {"precip": {"native_name": "prcp", "units": "mm", "target_units": "mm"}},
+        "grid": {"hindcast_range": [1991, 2020]},
+        "init_months": [2], "_verbose": False,
+    }
+    out = CCSRAdapter().fetch_data(cfg, "precip", date_range=(2020, 2021), region=None)
+    assert any(u.endswith("/SPEAR/hindcast/prcp") for u in opened)   # 2020 -> hindcast
+    assert any(u.endswith("/SPEAR/forecast/prcp") for u in opened)   # 2021 -> forecast
+    assert out.sizes["S"] == 2                                       # neither year dropped
+
+
 @pytest.mark.integration
 @pytest.mark.network
 @pytest.mark.parametrize("product,variable,members,region", [

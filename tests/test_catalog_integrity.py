@@ -141,6 +141,23 @@ def test_forecast_ranges_are_well_formed():
     assert not bad, "Malformed forecast ranges:\n" + _fmt(bad)
 
 
+def test_cfsv2_routes_2011_to_forecast_stream():
+    """Probe-verified (2026-06-30): the IRI cfsv2 HINDCAST stream ends 2011-03 and
+    FORECAST starts 2011-04, so year 2011's real-time inits live on FORECAST. A
+    boundary-spanning fetch must route 2011 to the forecast segment; a
+    hindcast_range ending at 2011 would send 2011 to HINDCAST and silently drop
+    the 9 Apr-Dec 2011 inits."""
+    from rosetta.adapters.base import AdapterBase
+
+    class _D(AdapterBase):
+        def fetch_data(self, *a, **k):
+            return None
+
+    segs = dict(_D()._resolve_streams(_catalog["nmme/cfsv2"], (1982, 2015)))
+    assert segs["hindcast"][1] == 2010, segs   # 2011 not routed to hindcast
+    assert segs["forecast"][0] == 2011, segs   # 2011 routed to forecast
+
+
 def test_same_c3s_system_has_same_hindcast_range():
     """A C3S (originating_centre, system) pair is one physical model; its reforecast
     *period* is a property of the system, so every catalog entry on that system must

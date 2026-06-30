@@ -2,6 +2,7 @@ import numpy as np
 import xarray as xr
 from .base import AdapterBase
 from ..normalize import decode_months_since
+from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
 
 
 
@@ -45,23 +46,47 @@ class OPeNDAPAdapter(AdapterBase):
             }
 
     def fetch_data(self, product_config, variable, date_range=None, region=None):
+        # Resolve the request into one or more (stream, sub_range) segments. A
+        # single segment reproduces today's start-year routing exactly; an
+        # `append_streams` product spanning the hindcast/forecast boundary yields
+        # two segments that we fetch separately and stitch on S.
+        segments = self._resolve_streams(product_config, date_range)
+        parts = [self._fetch_one_stream(product_config, variable, stream, rng, region)
+                 for stream, rng in segments]
+        if len(parts) == 1:
+            return parts[0]
+        # validate concat compatibility, then stitch on S
+        ref = parts[0]
+        for p in parts[1:]:
+            for d in ("Y", "X", "M", "L"):
+                if d in ref.dims and d in p.dims and ref.sizes[d] != p.sizes[d]:
+                    raise ValueError(
+                        f"append_streams: stream segments disagree on dim {d!r} "
+                        f"({ref.sizes[d]} vs {p.sizes[d]}); cannot concat.")
+        return xr.concat(parts, dim="S")
+
+    def _fetch_one_stream(self, product_config, variable, stream, date_range, region):
         verbose = product_config.get("_verbose", True)
+        max_retries = int(product_config.get("_max_retries", _DEFAULT_MAX_RETRIES))
+        retry_backoff = float(product_config.get("_retry_backoff", _DEFAULT_RETRY_BACKOFF))
         var_cfg = product_config["variables"][variable]
         native_name = var_cfg["native_name"]
         base = product_config["source_url"].rstrip("/")
         # Stream routing: a split_streams entry carries a `{stream}` placeholder in
-        # its source_url; pick HINDCAST vs FORECAST from the requested years (years
-        # past the hindcast range are the live forecast, otherwise the reforecast).
-        # Mirrors the CCSR adapter's split-stream routing, for the IRI NMME models
-        # that file hindcast and forecast at sibling .HINDCAST/.FORECAST paths.
+        # its source_url; the (HINDCAST/FORECAST) token is now chosen upstream by
+        # `_resolve_streams` and passed in as `stream`. Mirrors the CCSR adapter's
+        # split-stream routing, for the IRI NMME models that file hindcast and
+        # forecast at sibling .HINDCAST/.FORECAST paths.
         if product_config.get("split_streams"):
-            hr = (product_config.get("grid") or {}).get("hindcast_range")
-            is_forecast = bool(date_range and hr and date_range[0] > hr[1])
-            base = base.format(stream="FORECAST" if is_forecast else "HINDCAST")
+            base = base.format(stream=stream.upper())
         url = base + f"/.{native_name}/dods"
         if verbose:
             print(f"[rosetta:opendap] opening remote dataset: {url}")
-        ds = xr.open_dataset(url, engine="netcdf4", decode_times=False)
+        ds = _with_retry(
+            lambda: xr.open_dataset(url, engine="netcdf4", decode_times=False),
+            max_retries, retry_backoff,
+            label=f"OPeNDAP open {url}", verbose=verbose,
+        )
         if "S" in ds.coords:
             # NMME OPeNDAP: S is encoded as "months since YYYY-MM-DD"
             units = ds["S"].attrs.get("units", "")

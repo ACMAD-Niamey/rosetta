@@ -73,7 +73,8 @@ def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
-          reforecast=False, boundary="center", region_buffer=1.5):
+          reforecast=False, boundary="center", region_buffer=1.5,
+          year_index=False):
     """Fetch, normalize, and optionally save climate data.
 
     region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
@@ -231,7 +232,7 @@ def fetch(product, variable, init=None, target=None, region=None,
     # normalize gets the original (unpadded) bbox: in cover mode it expands by
     # half a cell to cover it; in center mode it slices to it exactly.
     clean = normalize(raw, config, variable, bbox, geometry=geometry,
-                      boundary=boundary)
+                      boundary=boundary, year_index=year_index)
 
     # A region was requested but the source isn't spatially griddable (e.g.
     # station/tabular data has no lat/lon grid): fail loudly rather than
