@@ -55,7 +55,11 @@ class OPeNDAPAdapter(AdapterBase):
                  for stream, rng in segments]
         if len(parts) == 1:
             return parts[0]
-        # validate concat compatibility, then stitch on S
+        # validate concat compatibility, then stitch on S. Segments are allowed to
+        # be empty or smaller than their nominal year span -- e.g. under the
+        # cfsv2 boundary-year overlap (see _resolve_streams), the forecast
+        # segment for a Jan-init request has no Jan-2011 init and simply
+        # contributes nothing for that year; this is expected, not an error.
         ref = parts[0]
         for p in parts[1:]:
             for d in ("Y", "X", "M", "L"):
@@ -63,7 +67,17 @@ class OPeNDAPAdapter(AdapterBase):
                     raise ValueError(
                         f"append_streams: stream segments disagree on dim {d!r} "
                         f"({ref.sizes[d]} vs {p.sizes[d]}); cannot concat.")
-        return xr.concat(parts, dim="S")
+        combined = xr.concat(parts, dim="S")
+        # Defensive dedup: the two streams shouldn't share an init (S value) for
+        # any given month, but if a boundary-year overlap ever causes both
+        # streams to return the same init (e.g. a catalog edge case), a
+        # duplicate S value must never double-count downstream (mean/ensemble
+        # math). Keep the first occurrence.
+        if "S" in combined.coords:
+            _, unique_idx = np.unique(combined["S"].values, return_index=True)
+            if len(unique_idx) != combined.sizes["S"]:
+                combined = combined.isel(S=np.sort(unique_idx))
+        return combined
 
     def _fetch_one_stream(self, product_config, variable, stream, date_range, region):
         verbose = product_config.get("_verbose", True)
@@ -124,11 +138,41 @@ class OPeNDAPAdapter(AdapterBase):
         if "target_lead_months" in product_config and "L" in ds.dims:
             lead_months = product_config["target_lead_months"]
             target_L = [m - 0.5 for m in lead_months]
-            avail_L = set(float(v) for v in ds.L.values)
-            sel_L = [lt for lt in target_L if lt in avail_L]
-            if sel_L:
-                ds = ds.sel(L=sel_L).mean("L")
-            # If none of the target leads are available fall through unchanged
-            # (caller's existing post-processing will handle it)
+            avail_L = np.asarray(sorted(float(v) for v in ds.L.values))
+            # Match on nearest value (tolerant of OPeNDAP float decoding noise)
+            # rather than exact `in` membership, which can spuriously miss.
+            sel_L = [lt for lt in target_L
+                     if avail_L.size and np.min(np.abs(avail_L - lt)) < 1e-6]
+            # A stream segment can legitimately have zero init times after the S
+            # filter above -- e.g. under the cfsv2 boundary-year overlap (see
+            # _resolve_streams / catalog.yaml), the FORECAST segment for a
+            # Jan-init request has no Jan-2011 init at all, so mask.sum() == 0.
+            # CONFIRMED against the live IRI endpoint: reducing L via `.isel`/
+            # `.sel(...).mean("L")` over a 0-length S dim leaves the lazy
+            # netCDF4/OPeNDAP-backed array's *actual* underlying data 5-D even
+            # though the resulting Dataset's declared `.dims`/`.sizes` correctly
+            # report L as dropped (4-D) -- a metadata/lazy-array desync specific
+            # to a 0-length outer dim that only manifests when xr.concat later
+            # forces materialization (`ValueError: ... 4 dimension(s) ... 5
+            # dimension(s)`), not from `.sizes` alone. A numpy-backed dataset
+            # does not reproduce this. Since an empty (S=0) segment carries no
+            # real data regardless of transformation, sidestep the lazy backend
+            # entirely: rebuild it as a genuinely empty, eager (numpy-backed)
+            # Dataset with the post-reduction dims/shape, so concat sees a real
+            # 4-D array rather than a mislabeled lazy one.
+            if ds.sizes.get("S", 1) == 0:
+                data_vars = {}
+                for name, var in ds.data_vars.items():
+                    dims = tuple(d for d in var.dims if d != "L")
+                    shape = tuple(ds.sizes[d] for d in dims)
+                    data_vars[name] = (dims, np.empty(shape, dtype=var.dtype))
+                non_l_dims = {d for v in data_vars.values() for d in v[0]}
+                coords = {d: ds[d].values for d in non_l_dims if d in ds.coords}
+                ds = xr.Dataset(data_vars, coords=coords)
+            elif sel_L:
+                idx_L = [int(np.argmin(np.abs(avail_L - lt))) for lt in sel_L]
+                ds = ds.isel(L=idx_L).mean("L").load()
+            # If none of the target leads are available (and S is non-empty)
+            # fall through unchanged (caller's existing post-processing handles it)
 
         return ds

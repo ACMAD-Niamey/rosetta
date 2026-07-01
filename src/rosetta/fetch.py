@@ -1,3 +1,4 @@
+import numpy as np
 import xarray as xr
 from nuthatch import cache
 
@@ -74,7 +75,7 @@ def fetch(product, variable, init=None, target=None, region=None,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
           reforecast=False, boundary="center", region_buffer=1.5,
-          year_index=False):
+          year_index=False, seasonal=None, grid_res=None, regrid_to=None):
     """Fetch, normalize, and optionally save climate data.
 
     region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
@@ -121,6 +122,24 @@ def fetch(product, variable, init=None, target=None, region=None,
     reforecast: when True, fetch the reforecast (hindcast) suite associated
     with the given issuance instead of the forecast itself. Currently
     honoured by the CDS adapter's s2s-forecasts branch.
+
+    seasonal=None (default): no seasonal aggregation. seasonal="mean" subsets
+    the `target` season's months on the `time` dim and averages them to one
+    value per calendar year (dim `time` -> `year`). No-op for data vars that
+    have no `time` dim (e.g. year_index=True results, already lead-averaged).
+    Requires `target`. Only within-year seasons are supported (e.g. MAM);
+    wraparound seasons that cross a calendar-year boundary (e.g. NDJ, DJF)
+    raise NotImplementedError, since groupby("time.year") would silently
+    split a single season instance across two different year groups.
+
+    grid_res=None (default): no regridding. grid_res=<float> interpolates
+    onto a regular lat/lon grid at that resolution spanning `region`
+    (np.arange(lat_s, lat_n + grid_res/2, grid_res), same for lon). Requires
+    `region`. Mutually exclusive with `regrid_to`.
+
+    regrid_to=None (default): no regridding. regrid_to=<xr.DataArray>
+    interpolates onto that DataArray's lat/lon coordinates. Mutually
+    exclusive with `grid_res`.
     """
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
@@ -216,7 +235,7 @@ def fetch(product, variable, init=None, target=None, region=None,
     if cover and bbox is not None:
         b = region_buffer
         fetch_bbox = [max(-90.0, bbox[0] - b), min(90.0, bbox[1] + b),
-                      bbox[2] - b, bbox[3] + b]
+                      max(-180.0, bbox[2] - b), min(180.0, bbox[3] + b)]
 
     _log(verbose, f"downloading via adapter={config['adapter']}")
     if cache:
@@ -233,6 +252,30 @@ def fetch(product, variable, init=None, target=None, region=None,
     # half a cell to cover it; in center mode it slices to it exactly.
     clean = normalize(raw, config, variable, bbox, geometry=geometry,
                       boundary=boundary, year_index=year_index)
+
+    if grid_res is not None and regrid_to is not None:
+        raise ValueError("pass grid_res or regrid_to, not both (mutually exclusive)")
+    if seasonal is not None:
+        if seasonal != "mean":
+            raise ValueError(f"seasonal must be 'mean' or None, got {seasonal!r}")
+        for name, da in list(clean.data_vars.items()):
+            if "time" in da.dims:
+                s, e = SEASON_MONTHS[target.upper()]
+                if e < s:
+                    raise NotImplementedError(
+                        f"seasonal='mean' does not yet support wraparound seasons ({target}); "
+                        "only within-year seasons are supported"
+                    )
+                months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
+                sub = da.sel(time=da.time.dt.month.isin(months))
+                clean[name] = sub.groupby("time.year").mean("time")
+    if grid_res is not None:
+        lat_s, lat_n, lon_w, lon_e = region
+        lats = np.arange(lat_s, lat_n + grid_res / 2.0, grid_res)
+        lons = np.arange(lon_w, lon_e + grid_res / 2.0, grid_res)
+        clean = clean.interp(lat=lats, lon=lons)
+    if regrid_to is not None:
+        clean = clean.interp(lat=regrid_to.lat.values, lon=regrid_to.lon.values)
 
     # A region was requested but the source isn't spatially griddable (e.g.
     # station/tabular data has no lat/lon grid): fail loudly rather than

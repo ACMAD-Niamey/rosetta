@@ -11,4 +11,15 @@ Quick start:
 
 from . import catalog
 from .fetch import fetch, parse_target, parse_init
+from .assemble import assemble
 from .health import check_product, check_all_products
+
+__all__ = [
+    "catalog",
+    "fetch",
+    "parse_target",
+    "parse_init",
+    "assemble",
+    "check_product",
+    "check_all_products",
+]
