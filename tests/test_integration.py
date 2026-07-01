@@ -103,6 +103,26 @@ def test_fetch_nmme_cfsv2_routes_streams_and_forecast_sst():
     assert float(s["sst"].notnull().mean()) > 0.3, "expected finite sst over ocean"
 
 
+@pytest.mark.integration
+@pytest.mark.network
+def test_cfsv2_jan_init_has_consecutive_years_incl_2011():
+    """Task A5 regression guard: the IRI cfsv2 HINDCAST/FORECAST streams split by
+    MONTH (not year) at 2011-03/2011-04, so a Jan-init request spanning 2011 used
+    to silently drop the year (routed entirely to FORECAST, which has no Jan-2011
+    init). The catalog's hindcast_range/forecast_range now overlap at 2011 so
+    _resolve_streams fetches that year from BOTH streams; this end-to-end fetch
+    must return consecutive years including a real (non-NaN) 2011."""
+    import numpy as np
+    da = rosetta.fetch("nmme/cfsv2", "precip", init="2026-01", target="MAM",
+                       hindcast=(2009, 2013), region=[-30, 30, -180, 180],
+                       year_index=True, boundary="center", cache=False, verbose=False)["precip"]
+    yrs = [int(y) for y in da.year.values]
+    assert yrs == [2009, 2010, 2011, 2012, 2013], yrs           # consecutive, 2011 present
+    y11 = da.sel(year=2011)
+    assert float(np.isfinite(y11).mean()) > 0.9                  # real data, not NaN
+    assert 1.0 < float(np.nanmean(y11)) < 10.0                   # sane precip (~3.7 mm/day)
+
+
 # ── NCEI ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.integration

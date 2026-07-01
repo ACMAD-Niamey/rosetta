@@ -141,6 +141,23 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
     if renames:
         ds = ds.rename(renames)
 
+    # Generic member-reduce knob: some products (e.g. NMME CFSv2's 28 PENTAD
+    # samples) need their ensemble collapsed to a fixed-size subset average
+    # before use, matching a legacy reference convention (CFSv2: average the
+    # first 24 of 28 members in native order). Catalog-driven and data-driven
+    # so it applies to any product that declares it; absent -> no reduction.
+    # Runs right after `member` exists (renamed above) and before the
+    # `year_index` reshape below, so it applies uniformly to plain and
+    # year_index fetches alike.
+    member_reduce = product_config.get("member_reduce")
+    if member_reduce and "member" in ds.dims:
+        first = member_reduce["first"]
+        op = member_reduce.get("op", "mean")
+        if op != "mean":
+            raise ValueError(f"member_reduce op must be 'mean', got {op!r}")
+        reduced = ds.isel(member=slice(0, first)).mean("member", keep_attrs=True)
+        ds = reduced.expand_dims(member=[0])
+
     var_cfg = product_config["variables"][variable]
     native = var_cfg["native_name"]
     if native not in ds and "short_name" in var_cfg:

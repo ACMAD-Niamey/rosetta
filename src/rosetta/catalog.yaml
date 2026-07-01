@@ -43,8 +43,13 @@ nmme/cfsv2:
   # years and FORECAST past hindcast_range[1]. The two streams are structurally
   # identical -- same 28 members, L=0.5..9.5 leads, 1deg global grid, and units
   # (verified against the live endpoints) -- so this is one dataset split only by
-  # period. NB the real split is mid-2011 (hindcast runs to ~2011-03, forecast
-  # from 2011-04); routing is by year, so a 2011 init resolves to FORECAST.
+  # period. NB the real split is by MONTH, not year: HINDCAST runs through
+  # ~2011-03 and FORECAST starts ~2011-04, so calendar year 2011 is physically
+  # split across BOTH streams. hindcast_range/forecast_range below deliberately
+  # OVERLAP at 2011 (see grid: block) so a boundary-spanning fetch requests 2011
+  # from both streams; each stream's init-time (S) filter then contributes only
+  # the inits it actually has (HINDCAST -> Jan-Mar 2011, FORECAST -> Apr-Dec
+  # 2011), and the adapter unions them -- no inits are dropped.
   source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.NCEP-CFSv2/.{stream}/.PENTAD_SAMPLES/.MONTHLY"
   variables:
     precip:
@@ -59,13 +64,20 @@ nmme/cfsv2:
       native_name: sst
       units: K
       target_units: K
+  # Legacy Ingrid convention (M/(1)(24)RANGE + [M]/average): collapse the 28
+  # PENTAD_SAMPLES members to the mean of the first 24 (native member order)
+  # before use. Generic `member_reduce` knob (see normalize.py); any product
+  # may set this, absent -> no reduction (all members preserved).
+  member_reduce:
+    first: 24
+    op: mean
   grid:
     lat_res: 1.0
     lon_res: 1.0
     forecast_members: 28
     hindcast_members: 28
-    hindcast_range: [1982, 2010]
-    forecast_range: [2011, null]   # real-time, ongoing. Probe-verified: HINDCAST stream ends 2011-03, FORECAST starts 2011-04; year-granular routing sends 2011 to FORECAST (captures Apr-Dec 2011; the 3 Jan-Mar 2011 reforecast-tail inits are not retrieved)
+    hindcast_range: [1982, 2011]   # deliberately overlaps forecast_range at 2011, the true (month-granular) stream split -- see split_streams note above
+    forecast_range: [2011, null]   # real-time, ongoing. Probe-verified: HINDCAST stream ends 2011-03, FORECAST starts 2011-04; both streams are fetched for 2011 and unioned (see _resolve_streams) so no inits are dropped
 
 nmme/cfsv2-forecast:
   alias_of: "nmme/cfsv2"   # deprecated: forecast is the same product, forecast stream

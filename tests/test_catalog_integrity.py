@@ -141,12 +141,15 @@ def test_forecast_ranges_are_well_formed():
     assert not bad, "Malformed forecast ranges:\n" + _fmt(bad)
 
 
-def test_cfsv2_routes_2011_to_forecast_stream():
+def test_cfsv2_split_year_fetched_from_both_streams():
     """Probe-verified (2026-06-30): the IRI cfsv2 HINDCAST stream ends 2011-03 and
-    FORECAST starts 2011-04, so year 2011's real-time inits live on FORECAST. A
-    boundary-spanning fetch must route 2011 to the forecast segment; a
-    hindcast_range ending at 2011 would send 2011 to HINDCAST and silently drop
-    the 9 Apr-Dec 2011 inits."""
+    FORECAST starts 2011-04, so calendar year 2011 is physically split across BOTH
+    streams. Routing 2011 to only one stream silently drops the other stream's
+    inits for that year (e.g. routing to FORECAST-only drops the Jan-Mar 2011
+    reforecast-tail inits). The catalog's hindcast_range/forecast_range therefore
+    OVERLAP at 2011 (the split year) so a boundary-spanning fetch requests 2011
+    from BOTH segments; each stream's own init-time (S) filter then contributes
+    only the inits it actually has, and the adapter unions them via concat."""
     from rosetta.adapters.base import AdapterBase
 
     class _D(AdapterBase):
@@ -154,8 +157,30 @@ def test_cfsv2_routes_2011_to_forecast_stream():
             return None
 
     segs = dict(_D()._resolve_streams(_catalog["nmme/cfsv2"], (1982, 2015)))
-    assert segs["hindcast"][1] == 2010, segs   # 2011 not routed to hindcast
-    assert segs["forecast"][0] == 2011, segs   # 2011 routed to forecast
+    # split year 2011 must be present in BOTH streams so no init month is dropped
+    assert segs["hindcast"][0] <= 2011 <= segs["hindcast"][1], segs
+    assert segs["forecast"][0] <= 2011 <= segs["forecast"][1], segs
+
+
+def test_non_overlapping_product_routing_is_unchanged():
+    """Backward-compat: a product whose hindcast_range and forecast_range do NOT
+    overlap (forecast_range[0] > hindcast_range[1]) must split cleanly at the
+    boundary with no overlap year -- today's (pre-A5) behavior for every product
+    other than cfsv2."""
+    from rosetta.adapters.base import AdapterBase
+
+    class _D(AdapterBase):
+        def fetch_data(self, *a, **k):
+            return None
+
+    cfg = {
+        "split_streams": True,
+        "append_streams": True,
+        "grid": {"hindcast_range": [1982, 2013], "forecast_range": [2014, None]},
+    }
+    segs = dict(_D()._resolve_streams(cfg, (1993, 2020)))
+    assert segs["hindcast"] == (1993, 2013), segs
+    assert segs["forecast"] == (2014, 2020), segs
 
 
 def test_same_c3s_system_has_same_hindcast_range():
