@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import xarray as xr
 from nuthatch import cache
@@ -44,6 +45,21 @@ SEASON_MONTHS = {
 def _log(verbose, msg):
     if verbose:
         print(f"[rosetta] {msg}")
+
+
+def _set_nuthatch_verbosity(verbose):
+    """Make ``verbose`` govern the nuthatch cache library's logging too.
+
+    nuthatch pins its own logger to INFO with a dedicated handler, so it prints
+    a "Found cache …"/"Caching result …" line on every access regardless of the
+    caller. That's the caching internals, not something a fetch caller asked to
+    see — so with ``verbose=False`` we quiet it (INFO -> WARNING). The child
+    ``nuthatch.nuthatch`` logger has its level set explicitly upstream, so it
+    must be lowered directly; the parent covers the other submodules.
+    """
+    level = logging.INFO if verbose else logging.WARNING
+    logging.getLogger("nuthatch").setLevel(level)
+    logging.getLogger("nuthatch.nuthatch").setLevel(level)
 
 
 def parse_target(target, year=None):
@@ -141,6 +157,7 @@ def fetch(product, variable, init=None, target=None, region=None,
     interpolates onto that DataArray's lat/lon coordinates. Mutually
     exclusive with `grid_res`.
     """
+    _set_nuthatch_verbosity(verbose)
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
     config = dict(catalog.get(product))
