@@ -1,26 +1,16 @@
-name: release
+name: publish
+
+# Every push to main runs the tests and, if they pass, publishes to PyPI.
+# The version is stamped automatically as 0.1.<build number> so you never edit
+# version numbers by hand. Publishing uses PyPI Trusted Publishing (no tokens).
+# To change the 0.1 base (e.g. to 0.2), edit the sed line in the publish job.
+
 on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  release-please:
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-    steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
-        with:
-          release-type: python
-
   test:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +21,7 @@ jobs:
       - run: uv run pytest -m "not network and not integration and not cds" -q
 
   publish:
-    needs: [release-please, test]
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: test
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -40,5 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - name: Stamp a unique version (0.1.<build number>)
+        run: sed -i -E 's/^version = ".*"/version = "0.1.${{ github.run_number }}"/' pyproject.toml
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
