@@ -98,7 +98,7 @@ def fetch(product, variable, init=None, target=None, region=None,
     shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
     the bounding box drives upstream slicing and the result is masked to the
     true polygon (cells outside it become NaN). Shapefile/geometry support
-    needs the `geo` extra: pip install 'rosetta[geo]'.
+    needs the `geo` extra: pip install 'accord-rosetta[geo]'.
 
     boundary selects which grid cells count as inside the region, for both bbox
     and shapefile/geometry inputs:
