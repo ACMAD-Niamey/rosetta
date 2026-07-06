@@ -26,7 +26,7 @@ from pathlib import Path
 
 _GEO_HINT = (
     "Shapefile and geometry region inputs require geopandas. "
-    "Install the geo extra:  pip install 'rosetta[geo]'"
+    "Install the geo extra:  pip install 'accord-rosetta[geo]'"
 )
 
 
