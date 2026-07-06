@@ -38,6 +38,10 @@ output/
 *.pem
 *.key
 *credentials*.json
+.cdsapirc
+.ecmwfapirc
+.netrc
+.dodsrc
 
 .claude_env
 

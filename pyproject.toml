@@ -1,8 +1,20 @@
 [project]
-name = "rosetta"
+name = "accord-rosetta"
 version = "0.1.0"
 description = "Canonical data acquisition for seasonal climate forecasting"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "accord-research" }]
+keywords = ["climate", "forecasting", "data-acquisition", "xarray", "cds", "chirps"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
 dependencies = [
     "xarray",
     "numpy",
@@ -17,17 +29,18 @@ dependencies = [
     "nuthatch>=0.4.9",
     "cfgrib>=0.9.15.1",
     "eccodeslib>=2.46.2.19",
-    # icechunk (versioned Zarr stores) is a default dep so the icechunk adapter
-    # never fails lazily at fetch time. It requires zarr>=3. sheerwater's
-    # metadata hard-pins zarr==2.18.3, but that pin is stale -- sheerwater reads
-    # through xarray's (version-agnostic) zarr backend and opens+reads its public
-    # stores fine under zarr 3 (verified by tests/test_sheerwater_integration.py
-    # against real data). We force zarr>=3 past that pin via the [tool.uv]
-    # override-dependencies below so both adapters resolve into one environment.
-    "icechunk>=2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/accord-research/rosetta"
+Repository = "https://github.com/accord-research/rosetta"
+
 [project.optional-dependencies]
+# icechunk (versioned Zarr stores) powers the optional icechunk adapter. It
+# needs zarr>=3, which conflicts with sheerwater's stale zarr==2.18.3 pin under
+# plain pip, so it is opt-in. Under uv, the [tool.uv] override below lets
+# `--extra icechunk` co-resolve both adapters into one environment.
+icechunk = ["icechunk>=2"]
 s3 = ["boto3"]
 dev = ["pytest"]
 demo = ["matplotlib", "cartopy", "rasterio"]
