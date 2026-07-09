@@ -117,7 +117,8 @@ def fetch(product, variable, init=None, target=None, region=None,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
           reforecast=False, boundary="center", region_buffer=1.5,
-          year_index=False, seasonal=None, grid_res=None, regrid_to=None):
+          year_index=False, seasonal=None, grid_res=None, regrid_to=None,
+          months=None):
     """Fetch, normalize, and optionally save climate data.
 
     init names the forecast issuance. Seasonal products take a month
@@ -131,6 +132,12 @@ def fetch(product, variable, init=None, target=None, region=None,
                       region="ethiopia.shp")
 
     The result is stacked on init_time, with lead_time and valid_time coords.
+
+    months restricts an observational fetch to those calendar months, e.g.
+    months=[6, 7, 8, 9] for a JJAS analysis. For products stored one file per
+    (year, month) this prunes the *download*, not just the result: a four-month
+    season over 45 years is 180 files rather than 540. Against a rate-limited
+    server that is the difference between a pull and a ban.
 
     region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
     shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
@@ -219,6 +226,22 @@ def fetch(product, variable, init=None, target=None, region=None,
 
     date_range = hindcast
     cache_init_date = None
+
+    if months is not None:
+        if init is not None:
+            raise ValueError(
+                "months prunes an observational fetch by calendar month; it has "
+                "no meaning alongside init, which already names the issuance."
+            )
+        wanted = sorted({int(m) for m in months})
+        if not wanted or not all(1 <= m <= 12 for m in wanted):
+            raise ValueError(f"months must be calendar months in 1..12, got {months!r}")
+        # `init_months` already means "which months of the year are in this
+        # request" (the OPeNDAP adapter filters its init axis with it) and is
+        # already a cache argument. Reusing it prunes the HTTP file enumeration
+        # and keys the cache correctly without adding a cache arg, which would
+        # invalidate every fetch already on disk.
+        config["init_months"] = wanted
 
     if init is not None and _is_init_sequence(init):
         # Several issuances at once: the hindcast-skill case, where you want the

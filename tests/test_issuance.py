@@ -422,3 +422,102 @@ def test_chirps_gefs_coverage_excludes_2020():
     grid = _catalog["chc/chirps-gefs-daily"]["grid"]
     assert grid["hindcast_range"] == [2001, 2019]
     assert grid["forecast_range"] == [2021, None]
+
+
+# --- month pruning for plain time-series products --------------------------
+# Not an issuance feature, but the same file-enumeration code path.
+
+
+def test_month_pruning_downloads_only_the_requested_months(monkeypatch):
+    """A JJAS analysis needs four months of every year, not twelve. Downloading
+    the other eight and discarding them triples the requests against a
+    rate-limited server."""
+    opened = []
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        opened.append(url)
+        return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
+
+    monkeypatch.setattr("rosetta.adapters.http._open_cog_subset", fake_open)
+    _fetch({"file_pattern": "p.{year}.{month:02d}.tif", "init_months": [6, 7, 8, 9]},
+           date_range=(2001, 2002))
+    assert len(opened) == 8
+    assert all(url[-6:-4] in ("06", "07", "08", "09") for url in opened)
+
+
+def test_without_month_pruning_every_month_is_downloaded(monkeypatch):
+    opened = []
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        opened.append(url)
+        return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
+
+    monkeypatch.setattr("rosetta.adapters.http._open_cog_subset", fake_open)
+    _fetch({"file_pattern": "p.{year}.{month:02d}.tif"}, date_range=(2001, 2002))
+    assert len(opened) == 24
+
+
+def test_month_pruning_does_not_touch_year_only_patterns(monkeypatch):
+    opened = []
+
+    def fake_open(url, region, variable=None, fill_value=None):
+        opened.append(url)
+        return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
+
+    monkeypatch.setattr("rosetta.adapters.http._open_cog_subset", fake_open)
+    _fetch({"file_pattern": "p.{year}.tif", "init_months": [6]}, date_range=(2001, 2002))
+    assert len(opened) == 2
+
+
+OBS_ENTRY = {
+    "adapter": "http",
+    "source_url": BASE,
+    "format": "cog",
+    "file_pattern": "p.{year}.{month:02d}.cog",
+    "variables": {"precip": {"native_name": "precip", "units": "mm/month",
+                             "target_units": "mm/day"}},
+    "grid": {"lat_res": 0.05, "lon_res": 0.05},
+}
+
+
+def _raw_monthly():
+    stamps = [np.datetime64(f"2001-{m:02d}-01") for m in (6, 7, 8, 9)]
+    return xr.Dataset(
+        {"precip": (("time", "latitude", "longitude"), np.ones((4, 2, 2)))},
+        coords={"time": stamps, "latitude": [0.0, 1.0], "longitude": [30.0, 31.0]},
+    )
+
+
+def test_fetch_months_reaches_the_adapter_as_init_months(monkeypatch):
+    fetch_mod, seen = _fake_env(monkeypatch, _raw_monthly(), OBS_ENTRY)
+    fetch_mod.fetch("obs/x", "precip", hindcast=(2001, 2001), months=[9, 6, 7, 8],
+                    cache=False, verbose=False, progress=False)
+    assert seen["config"]["init_months"] == [6, 7, 8, 9]
+
+
+def test_fetch_months_rejects_out_of_range_or_empty_values(monkeypatch):
+    fetch_mod, _ = _fake_env(monkeypatch, _raw_monthly(), OBS_ENTRY)
+    for bad in ([0], [13], []):
+        with pytest.raises(ValueError, match="calendar months in 1..12"):
+            fetch_mod.fetch("obs/x", "precip", hindcast=(2001, 2001), months=bad,
+                            cache=False, verbose=False)
+
+
+def test_fetch_months_is_rejected_alongside_init(monkeypatch):
+    fetch_mod, _ = _fake_env(monkeypatch, _raw_cube(), ISSUANCE_ENTRY)
+    with pytest.raises(ValueError, match="no meaning alongside init"):
+        fetch_mod.fetch("chc/chirps-gefs-daily", "precip", init="2026-07-05",
+                        months=[6], cache=False, verbose=False)
+
+
+def test_fetch_months_keys_the_cache_without_a_new_cache_argument():
+    """`months` rides the existing `init_months` cache slot, so no fetch already
+    on disk is invalidated, and two different month sets do not collide."""
+    import inspect
+
+    # `from rosetta import fetch` gives the function; the module is one level in.
+    fetch_mod = importlib.import_module("rosetta.fetch")
+
+    args = inspect.signature(fetch_mod._fetch_raw_cached).parameters
+    assert "init_months" in args
+    assert "months" not in args

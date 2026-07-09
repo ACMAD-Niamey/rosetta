@@ -213,7 +213,13 @@ class HTTPAdapter(AdapterBase):
         if date_range:
             y0, y1 = date_range
             if "{month" in file_pattern:
-                files = [file_pattern.format(year=y, month=m) for y in range(y0, y1 + 1) for m in range(1, 13)]
+                # A seasonal analysis needs four months of every year, not
+                # twelve. Downloading the other eight and discarding them costs
+                # three times the requests against a rate-limited server; for
+                # CHIRPS that is the difference between a pull and a ban.
+                months = product_config.get("init_months") or range(1, 13)
+                files = [file_pattern.format(year=y, month=m)
+                         for y in range(y0, y1 + 1) for m in months]
             else:
                 files = [file_pattern.format(year=y) for y in range(y0, y1 + 1)]
         else:
