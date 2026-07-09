@@ -12,11 +12,13 @@ Quick start:
 from . import catalog
 from .fetch import fetch, parse_target, parse_init
 from .assemble import assemble
+from .zonal import zonal
 from .health import check_product, check_all_products
 
 __all__ = [
     "catalog",
     "fetch",
+    "zonal",
     "parse_target",
     "parse_init",
     "assemble",
