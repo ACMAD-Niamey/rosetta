@@ -1087,6 +1087,84 @@ c3s/ecmwf-seas51c:
     # appended route may be trimmed. Verify before relying on the start year.
     hindcast_range: [1993, 2016]
 
+# ---------------------------------------------------------------------------
+# CHC forecast products (data.chc.ucsb.edu)
+#
+# Issuance-keyed: one file per (issuance date, lead), located by the `issuance`
+# block's strftime templates over {init}, {valid} and {lead}. Fetch them with
+# init="YYYY-MM-DD", or with a sequence of such dates to stack many issuances
+# on init_time (e.g. the June-30 forecast of every hindcast year).
+#
+# CHIRPS3-GEFS is GEFSv12 bias-corrected to the CHIRPS3 distribution and
+# downscaled with IMERGv7-Late. Its record has a deliberate hole: GEFS
+# reforecasts start January 2000 but the IMERG used to downscale them starts
+# June 2000, and the operational GEFSv12 stream begins September 2020 — so CHC
+# publishes complete years only, 2001-2019 (reforecast) and 2021-present. That
+# 2001-2019 span is what makes a real hindcast-skill analysis possible.
+#
+# The older CHIRPS2-GEFS stream (products/EWX/.../CHIRPS-GEFS_precip_v12) was
+# discontinued on 2026-07-01 and is deliberately not catalogued.
+# ---------------------------------------------------------------------------
+chc/chirps-gefs-daily:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-GEFS/v3/daily/global/"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  issuance:
+    # Directory = issuance date, filename = valid date. Lead 0 is the issuance
+    # day itself, so a "15-day forecast" spans leads 0-14; the archive carries
+    # one more (16 files per issuance).
+    path_pattern: "{init:%Y}/{init:%m}/{init:%d}"
+    file_pattern: "c3g_{valid:%Y}.{valid:%m}.{valid:%d}.tif"
+    leads: [0, 15]
+    lead_units: days
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [2001, 2019]   # GEFSv12 reforecast era
+    forecast_range: [2021, null]   # operational; 2020 deliberately absent
+    temporal: daily
+  notes: >-
+    CHIRPS3-GEFS daily precipitation forecast, 16 leads per issuance, issued
+    daily. Aggregate to dekads/pentads downstream (deepscale.accumulate) rather
+    than fetching CHC's separate dekad product, which is keyed by target dekad
+    rather than by issuance and so does not fit the issuance templating.
+
+chc/chirps-gefs-15day:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-GEFS/v3/15_day/global/data/"
+  format: tif
+  request_interval: 3.0
+  issuance:
+    # One accumulated 15-day total per issuance: no lead dimension, and the
+    # filename carries the init date rather than a valid date.
+    path_pattern: "{init:%Y}"
+    file_pattern: "c3g_{init:%Y}.{init:%m}.{init:%d}.tif"
+    leads: [0, 0]
+    lead_units: days
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 15-day accumulation, left as a total
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [2001, 2019]
+    forecast_range: [2021, null]
+    temporal: 15day
+  notes: >-
+    CHIRPS3-GEFS 15-day accumulated precipitation total, one raster per
+    issuance. lead_time is a singleton (0 days) spanning the [init, init+15d)
+    window, so valid_time marks the window's start, not its end.
+
 c3s/ecmwf-s2s:
   adapter: cds
   cds_dataset: "s2s-forecasts"

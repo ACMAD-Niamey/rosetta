@@ -86,6 +86,32 @@ def parse_init(init):
     return init
 
 
+def _is_init_sequence(init):
+    """True when ``init`` names several issuances rather than one.
+
+    Anything iterable that is not a string or a date: a list, a tuple, a numpy
+    array, a pandas DatetimeIndex.
+    """
+    from datetime import date, datetime
+
+    if isinstance(init, (str, bytes, datetime, date)):
+        return False
+    return hasattr(init, "__iter__")
+
+
+def _daily_issuance_key(init):
+    """The 'YYYY-MM-DD' form of a single issuance, or None if it is month-keyed.
+
+    Seasonal products are issued for a month; sub-seasonal and short-range ones
+    for a specific day. Only the latter can be enumerated as issuance dates.
+    """
+    if isinstance(init, str):
+        return init if len(init) == 10 else None
+    if hasattr(init, "strftime"):
+        return init.strftime("%Y-%m-%d")
+    return None
+
+
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
@@ -93,6 +119,18 @@ def fetch(product, variable, init=None, target=None, region=None,
           reforecast=False, boundary="center", region_buffer=1.5,
           year_index=False, seasonal=None, grid_res=None, regrid_to=None):
     """Fetch, normalize, and optionally save climate data.
+
+    init names the forecast issuance. Seasonal products take a month
+    ("2026-07"); sub-seasonal and short-range ones take a day ("2026-07-05").
+    Issuance-keyed products (whose catalog entry has an `issuance` block) also
+    accept a *sequence* of dates, which is how you fetch the same calendar
+    issuance of many years for a hindcast-skill analysis:
+
+        rosetta.fetch("chc/chirps-gefs-daily", "precip",
+                      init=[f"{y}-06-30" for y in range(2001, 2020)],
+                      region="ethiopia.shp")
+
+    The result is stacked on init_time, with lead_time and valid_time coords.
 
     region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
     shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
@@ -180,6 +218,43 @@ def fetch(product, variable, init=None, target=None, region=None,
     # has decommissioned legacy WEB-API access to the S2S dataset.
 
     date_range = hindcast
+    cache_init_date = None
+
+    if init is not None and _is_init_sequence(init):
+        # Several issuances at once: the hindcast-skill case, where you want the
+        # same calendar issuance of every year. Only products that declare an
+        # `issuance` block know how to enumerate more than one.
+        inits = list(init)
+        if not inits:
+            raise ValueError("init was an empty sequence")
+        if target is not None:
+            raise ValueError(
+                "target selects lead months relative to a single init; it cannot "
+                "be combined with a sequence of issuance dates. Fetch the leads "
+                "and select the target window afterwards."
+            )
+        if config.get("issuance") is None:
+            raise ValueError(
+                f"product {product!r} accepts a single init, not a sequence of "
+                f"{len(inits)}. Only issuance-keyed products (whose catalog entry "
+                "has an 'issuance' block) can be fetched across many issuances."
+            )
+        keys = [_daily_issuance_key(i) for i in inits]
+        if any(key is None for key in keys):
+            raise ValueError(
+                "issuance dates must be full 'YYYY-MM-DD' dates or datetimes; "
+                f"got {inits!r}"
+            )
+        init_dts = [parse_init(k) for k in keys]
+        config["_init_dates"] = sorted(set(keys))
+        config["init_months"] = sorted({d.month for d in init_dts})
+        if date_range is None:
+            years = [d.year for d in init_dts]
+            date_range = (min(years), max(years))
+        # Reuse the existing `init_date` cache slot rather than adding a new one,
+        # so every already-cached single-issuance fetch stays valid.
+        cache_init_date = tuple(config["_init_dates"])
+        init = None  # the single-init branch below does not apply
 
     if init:
         init_dt = parse_init(init)
@@ -199,6 +274,16 @@ def fetch(product, variable, init=None, target=None, region=None,
         # The seasonal datasets ignore _init_date and use init_months instead.
         if isinstance(init, str) and len(init) == 10:
             config["_init_date"] = init
+            cache_init_date = init
+        if config.get("issuance") is not None:
+            key = _daily_issuance_key(init)
+            if key is None:
+                raise ValueError(
+                    f"product {product!r} is issuance-keyed and needs a full "
+                    f"'YYYY-MM-DD' init date, got {init!r}"
+                )
+            config["_init_dates"] = [key]
+            cache_init_date = key
 
         if target:
             target_range = parse_target(target, year=init_dt.year)
@@ -259,7 +344,7 @@ def fetch(product, variable, init=None, target=None, region=None,
         raw = _fetch_raw_cached(
             product, variable, config, date_range, fetch_bbox,
             init_months=tuple(config.get("init_months", [])),
-            init_date=config.get("_init_date"),
+            init_date=cache_init_date,
         )
     else:
         raw = get_adapter(config["adapter"]).fetch_data(
