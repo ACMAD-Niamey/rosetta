@@ -400,14 +400,17 @@ def test_http_adapter_rate_limiter_paces_real_requests(tmp_path):
         server.stop()
 
 
-# ── Observational SST (ERSST v5, NOAA NCEI HTTP) ────────────────────────────
+# ── Observational SST (ERSST v5, NOAA PSL OPeNDAP) ──────────────────────────
 # Tests cover: two geographies, two non-adjacent years, multi-year series.
+# These were written against a planned `sst/ersst-v5` product that was never
+# implemented; the product now exists as `obs/ersst-v5` (the catalog's `obs/`
+# channel convention, as with obs/era5, which also carries sst).
 
 @pytest.mark.integration
 @pytest.mark.network
 def test_fetch_ersst_v5_east_africa_recent():
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2020, 2020),
         region=[-20, 20, 20, 55],
@@ -426,7 +429,7 @@ def test_fetch_ersst_v5_west_pacific_historical():
     # Warm-pool region, well inside 0..360 longitude convention
     region = [-10, 10, 140, 180]
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2000, 2000),
         region=region,
@@ -443,7 +446,7 @@ def test_fetch_ersst_v5_west_pacific_historical():
 @pytest.mark.network
 def test_fetch_ersst_v5_multiyear_timeseries():
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2010, 2012),
         region=[-20, 20, 20, 55],

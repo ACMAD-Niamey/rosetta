@@ -174,9 +174,10 @@ def test_ersst_entry_declares_what_the_opendap_adapter_needs():
     assert entry["url_template"] == "{base}"
     assert entry["decode_times"] is True
     assert entry["variables"]["sst"]["native_name"] == "sst"
-    # ERSST is already in degrees Celsius; a K->C conversion would be wrong.
+    # ERSST is already in Celsius, so no conversion fires; the target label is
+    # rosetta's canonical "C", matching every other temperature product.
     assert entry["variables"]["sst"]["units"] == "degC"
-    assert entry["variables"]["sst"]["target_units"] == "degC"
+    assert entry["variables"]["sst"]["target_units"] == "C"
 
 
 def test_ersst_is_not_declared_as_a_forecast_product():
@@ -195,7 +196,7 @@ def test_fetch_ersst_v5_monthly_sst():
     ds = rosetta.fetch(product="obs/ersst-v5", variable="sst",
                        hindcast=(1991, 1992), region=REGION, verbose=True)
     assert "sst" in ds and ds.sizes["time"] == 24
-    assert ds["sst"].attrs["units"] == "degC"
+    assert ds["sst"].attrs["units"] == "C"
     assert float(ds.lat[0]) < float(ds.lat[-1]), "latitude not sorted ascending"
     # Equatorial Indian Ocean SST: warm, and certainly not a Kelvin value.
     assert 20.0 < float(ds["sst"].mean()) < 32.0

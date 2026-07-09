@@ -1213,8 +1213,8 @@ obs/ersst-v5:
   variables:
     sst:
       native_name: sst
-      units: degC
-      target_units: degC
+      units: degC        # as the file declares it
+      target_units: C    # rosetta's canonical Celsius label (see _CONVERSIONS)
   grid:
     lat_res: 2.0
     lon_res: 2.0
