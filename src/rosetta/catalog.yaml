@@ -1199,6 +1199,33 @@ c3s/ecmwf-s2s:
   # Hindcast availability depends on the issuance date — ECMWF S2S provides
   # on-the-fly reforecasts for the same calendar week, not a static range.
 
+obs/ersst-v5:
+  adapter: opendap
+  # NOAA PSL THREDDS. One NetCDF per variable, served whole — no Ingrid variable
+  # path segment — so url_template overrides the IRIDL default.
+  source_url: "https://psl.noaa.gov/thredds/dodsC/Datasets/noaa.ersst.v5/sst.mnmean.nc"
+  url_template: "{base}"
+  decode_times: true      # ordinary "days since 1800-1-1", unlike NMME's "months since"
+  # Probed 2026-07-09: a 120-month global request returns real data; 240 months
+  # comes back zero-filled, with netCDF4 printing "DAP DATADDS packet is
+  # apparently too short" to stderr and raising nothing. Chunk well under that.
+  max_request_years: 5
+  variables:
+    sst:
+      native_name: sst
+      units: degC
+      target_units: degC
+  grid:
+    lat_res: 2.0
+    lon_res: 2.0
+    hindcast_range: [1954, 2026]
+    temporal: monthly
+  notes: >-
+    NOAA Extended Reconstructed SST v5, 2° monthly, 1854-present (catalogued
+    from 1954; the 19th-century record is sparse). The reference SST dataset for
+    the 1991-2020 WMO baseline used by ONI/RONI/IOD index verification. Latitude
+    is stored north-to-south upstream; the adapter sorts it ascending.
+
 obs/era5:
   adapter: cds
   cds_dataset: "reanalysis-era5-single-levels-monthly-means"
