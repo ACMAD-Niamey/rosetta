@@ -66,6 +66,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rosetta"]
+# Ship the package-local nuthatch.toml so it lands next to rosetta's modules and
+# shadows any ambient nuthatch config in site-packages (see src/rosetta/nuthatch.toml).
+force-include = { "src/rosetta/nuthatch.toml" = "rosetta/nuthatch.toml" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

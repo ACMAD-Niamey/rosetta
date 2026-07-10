@@ -303,3 +303,106 @@ def test_cli_is_registered_in_pyproject():
     scripts = config.get("project", {}).get("scripts", {})
     assert "rosetta" in scripts, \
         "Missing 'rosetta' entry in [project.scripts] in pyproject.toml"
+
+
+# --- Regression tests for the nuthatch cache-root hijack -----------------------
+# When accord-rosetta and sheerwater are both installed, nuthatch's upward config
+# search leaves site-packages/rosetta/ and adopts sheerwater's site-packages/
+# nuthatch.toml, which pins the cache root at gs://sheerwater-datalake/caches.
+# Any user without those GCS credentials then fails on their first fetch() with a
+# 401 / interactive prompt / fsspec "Protocol not known" crash. rosetta defends by
+# (1) shipping a package-local nuthatch.toml that shadows the ambient one, and
+# (2) pinning the root/local cache to a local file:// path via NUTHATCH_* env vars
+# at import. These tests guard both halves.
+
+def test_shadow_nuthatch_toml_shipped_and_wheel_included():
+    """A package-local nuthatch.toml must ship so it shadows any ambient config
+    (e.g. sheerwater's) that would otherwise hijack rosetta's cache root."""
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    shadow = root / "src/rosetta/nuthatch.toml"
+    assert shadow.exists(), \
+        "src/rosetta/nuthatch.toml must exist to shadow ambient nuthatch configs"
+
+    with open(shadow, "rb") as f:
+        cfg = tomllib.load(f)
+    fs = cfg.get("tool", {}).get("nuthatch", {}).get("filesystem", "")
+    assert fs.startswith("file://"), \
+        f"shadow config root must be a local file:// path, got {fs!r}"
+
+    # packages= alone can drop non-.py data files, so it must be force-included.
+    with open(root / "pyproject.toml", "rb") as f:
+        pp = tomllib.load(f)
+    wheel = pp["tool"]["hatch"]["build"]["targets"]["wheel"]
+    force = wheel.get("force-include", {})
+    assert any("nuthatch.toml" in v for v in force.values()), \
+        "pyproject must force-include src/rosetta/nuthatch.toml in the wheel"
+
+
+def test_init_pins_nuthatch_cache_env():
+    """rosetta/__init__.py must pin the nuthatch root/local cache to a local
+    file:// filesystem at import. An installed package's own config is demoted to
+    a mirror and cannot set the root, so the NUTHATCH_* env vars are the only
+    lever; the file:// prefix is required to dodge the fsspec '://' parse bug."""
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "src/rosetta/__init__.py").read_text()
+    assert "NUTHATCH_ROOT_FILESYSTEM" in src, \
+        "__init__.py must pin NUTHATCH_ROOT_FILESYSTEM"
+    assert "NUTHATCH_LOCAL_FILESYSTEM" in src, \
+        "__init__.py must pin NUTHATCH_LOCAL_FILESYSTEM"
+    assert "setdefault" in src, \
+        "must use os.environ.setdefault so user/CI overrides still win"
+    assert "file://" in src, \
+        "cache filesystem must be file://-prefixed (fsspec split_protocol)"
+
+
+def test_import_resolves_local_root_and_no_remote_mirror(tmp_path):
+    """Behavioral end-to-end guard: importing rosetta in an isolated environment
+    must resolve the nuthatch cache to a local file:// root with NO remote
+    (gs://) cache anywhere — even though sheerwater's nuthatch.toml is present in
+    site-packages. Run in a subprocess with a clean HOME/cwd and no NUTHATCH_*
+    env so the result reflects only rosetta's own defaults."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    script = (
+        "import json\n"
+        "import rosetta\n"
+        "from nuthatch.config import NuthatchConfig\n"
+        "cfg = NuthatchConfig(rosetta).config\n"
+        "def walk(d):\n"
+        "    out = []\n"
+        "    if isinstance(d, dict):\n"
+        "        for k, v in d.items():\n"
+        "            if k == 'filesystem' and isinstance(v, str):\n"
+        "                out.append(v)\n"
+        "            else:\n"
+        "                out += walk(v)\n"
+        "    return out\n"
+        "print(json.dumps({'root': cfg.get('root', {}).get('filesystem'), "
+        "'all': walk(cfg)}))\n"
+    )
+
+    # Isolate from the developer's ~/.nuthatch.toml (HOME), the repo's own
+    # pyproject (cwd), and any inherited NUTHATCH_* / ROSETTA_CACHE_DIR.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("NUTHATCH") and k != "ROSETTA_CACHE_DIR"}
+    env["HOME"] = str(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"subprocess failed:\n{result.stderr}"
+    data = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert data["root"] and data["root"].startswith("file://"), \
+        f"resolved root cache must be a local file:// path, got {data['root']!r}"
+    remote = [fs for fs in data["all"]
+              if fs.startswith(("gs://", "s3://", "http://", "https://"))]
+    assert not remote, \
+        f"no remote cache filesystem may be configured, found: {remote}"
