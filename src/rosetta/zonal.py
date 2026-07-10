@@ -115,6 +115,7 @@ def zonal(
     geometries,
     *,
     by: str | None = None,
+    label: str | None = None,
     stat: str = "mean",
     weights: str | xr.DataArray | None = "area",
     all_touched: bool = False,
@@ -133,8 +134,15 @@ def zonal(
         output element per feature, which is the difference from
         ``fetch(region=...)``.
     by : str, optional
-        Column of ``geometries`` to label the output ``dim`` with (e.g.
-        ``"ADM3_EN"``). Defaults to the positional index. Must be unique.
+        Column of ``geometries`` to index the output ``dim`` by (e.g. a unique
+        admin code like ``"shapeID"``). Defaults to the positional index. Must
+        be unique — an index has to be, for ``.sel`` to be unambiguous. Real
+        admin datasets routinely have a unique *code* column and a non-unique
+        *name* column; index by the code, and pass the name as ``label``.
+    label : str, optional
+        Column carried as a companion ``{dim}_label`` coordinate for display.
+        Unlike ``by`` it may repeat — two woredas can share a name. This is the
+        clean way to keep human-readable names on a uniquely-indexed axis.
     stat : {"mean", "sum", "min", "max", "median", "std", "count"}
         The reduction. ``"count"`` returns the number of contributing cells.
     weights : {"area", "cos_lat", None} or xr.DataArray
@@ -181,10 +189,23 @@ def zonal(
             )
         names = gdf[by].to_numpy()
         if len(set(names.tolist())) != len(names):
+            dupes = sorted({n for n in names.tolist() if names.tolist().count(n) > 1})
             raise ValueError(
-                f"column {by!r} has duplicate values, so it cannot label the "
-                f"{dim!r} axis. Dissolve the duplicates first, or pass by=None."
+                f"column {by!r} has duplicate values ({dupes[:5]}...), so it "
+                f"cannot index the {dim!r} axis. Admin datasets usually have a "
+                "unique code column (e.g. 'shapeID') and a repeating name column "
+                "— index by the code and pass the name as label=. Or pass "
+                "by=None for a positional index."
             )
+
+    label_values = None
+    if label is not None:
+        if label not in gdf.columns:
+            raise ValueError(
+                f"label column {label!r} not found in geometries; "
+                f"have {list(gdf.columns)}"
+            )
+        label_values = gdf[label].to_numpy()
 
     data = data.sortby([lat, lon])
     lat_values = data[lat].values
@@ -221,11 +242,17 @@ def zonal(
 
     result = result.rename({"_zone": dim})
     # groupby yields the sorted set of labels present; a region with no cells is
-    # absent. Reindex so the output always mirrors the input geometries.
+    # absent. Reindex so the output always mirrors the input geometries. The
+    # reindex is done against the positional index (groupby's own labels), then
+    # the requested names are assigned — so a `by` value that never won a cell
+    # still appears, rather than being silently dropped.
     result = result.reindex({dim: np.arange(len(gdf))})
     if stat == "count":
         result = result.fillna(0)
-    return result.assign_coords({dim: names})
+    result = result.assign_coords({dim: names})
+    if label_values is not None:
+        result = result.assign_coords({f"{dim}_label": (dim, label_values)})
+    return result
 
 
 def _weighted_group(stacked, cell_weights, zone, stat):

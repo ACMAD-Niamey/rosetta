@@ -317,3 +317,40 @@ def test_zonal_output_feeds_the_completion_engine_unchanged(halves):
     )
     assert result.totals.dims == ("scenario", "region")
     assert list(result.percentile.region.values) == ["west", "east"]
+
+
+# --- unique index + repeating display label --------------------------------
+# Real admin datasets (GeoBoundaries, GADM, OCHA) carry a unique code column and
+# a non-unique name column: two districts can share a name across parent zones.
+
+
+def _coded_regions():
+    import geopandas as gpd
+    from shapely.geometry import box
+    return gpd.GeoDataFrame(
+        {"code": ["A1", "A2"], "name": ["Gursum", "Gursum"]},  # same name, twice
+        geometry=[box(0, 0, 2, 4), box(2, 0, 4, 4)], crs="EPSG:4326",
+    )
+
+
+def test_zonal_indexes_by_a_unique_code_and_carries_a_repeating_label(grid):
+    got = zonal(grid, _coded_regions(), by="code", label="name")
+    assert list(got.region.values) == ["A1", "A2"]
+    assert list(got.region_label.values) == ["Gursum", "Gursum"]
+    # the label rides along and stays selectable by the unique index
+    assert str(got.sel(region="A1").region_label.values) == "Gursum"
+
+
+def test_zonal_duplicate_index_error_points_at_the_code_plus_label_pattern(grid):
+    with pytest.raises(ValueError, match="unique code column"):
+        zonal(grid, _coded_regions(), by="name")
+
+
+def test_zonal_label_column_must_exist(grid, halves):
+    with pytest.raises(ValueError, match="label column 'nope' not found"):
+        zonal(grid, halves, by="name", label="nope")
+
+
+def test_zonal_label_is_optional(grid, halves):
+    got = zonal(grid, halves, by="name")
+    assert "region_label" not in got.coords
