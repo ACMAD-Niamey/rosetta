@@ -907,7 +907,7 @@ def test_http_adapter_strict_raises_on_any_failure(monkeypatch):
     import re
     from rosetta.adapters import http as http_mod
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         m = re.search(r"(\d{4})\.(\d{2})", url)
         year, month = int(m.group(1)), int(m.group(2))
         # Pretend the second month of the second year is poisoned.
@@ -927,7 +927,7 @@ def test_http_adapter_allow_partial_returns_partial(monkeypatch):
     import re
     from rosetta.adapters import http as http_mod
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         m = re.search(r"(\d{4})\.(\d{2})", url)
         year, month = int(m.group(1)), int(m.group(2))
         if year == 2011 and month == 2:
@@ -948,7 +948,7 @@ def test_http_adapter_strict_succeeds_when_all_files_load(monkeypatch):
     import re
     from rosetta.adapters import http as http_mod
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         m = re.search(r"(\d{4})\.(\d{2})", url)
         return _fake_cog_ds(int(m.group(1)), int(m.group(2)))
 
@@ -967,7 +967,7 @@ def test_http_adapter_retries_recover_from_transient_failure(monkeypatch):
     # Each (year, month) fails twice, then succeeds. With max_retries=3 we
     # should still end up with all 12 months.
     attempts = {}
-    def flaky_open(url, region, variable=None, fill_value=None):
+    def flaky_open(url, region, variable=None, fill_value=None, timestamp=None):
         m = re.search(r"(\d{4})\.(\d{2})", url)
         key = (int(m.group(1)), int(m.group(2)))
         attempts[key] = attempts.get(key, 0) + 1
@@ -991,7 +991,7 @@ def test_http_adapter_retries_exhaust_then_raise(monkeypatch):
     """After the retry budget is spent, strict mode raises for the run."""
     from rosetta.adapters import http as http_mod
 
-    def always_fail(url, region, variable=None, fill_value=None):
+    def always_fail(url, region, variable=None, fill_value=None, timestamp=None):
         raise RuntimeError("persistent: not a supported file format.")
 
     monkeypatch.setattr(http_mod, "_open_cog_subset", always_fail)
@@ -1008,7 +1008,7 @@ def test_http_adapter_does_not_retry_http_4xx(monkeypatch):
     from rosetta.adapters import http as http_mod
 
     attempts = {"n": 0}
-    def four_oh_four(url, region, variable=None, fill_value=None):
+    def four_oh_four(url, region, variable=None, fill_value=None, timestamp=None):
         attempts["n"] += 1
         raise RuntimeError("HTTP response code: 404")
 
@@ -1029,7 +1029,7 @@ def test_http_adapter_rate_limiter_enforces_minimum_interval(monkeypatch):
     import re
     from rosetta.adapters import http as http_mod
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         m = re.search(r"(\d{4})\.(\d{2})", url)
         return _fake_cog_ds(int(m.group(1)), int(m.group(2)))
 
@@ -1077,7 +1077,7 @@ def test_http_adapter_catalog_request_interval_paces_without_caller_value(monkey
     from rosetta.adapters import http as http_mod
 
     monkeypatch.setattr(http_mod, "_open_cog_subset",
-                        lambda url, region, variable=None, fill_value=None:
+                        lambda url, region, variable=None, fill_value=None, timestamp=None:
                         _fake_cog_ds(*map(int, re.search(r"(\d{4})\.(\d{2})", url).groups())))
     sleeps = _stub_clock(monkeypatch)
 
@@ -1096,7 +1096,7 @@ def test_http_adapter_catalog_interval_is_a_floor_not_a_default(monkeypatch):
     from rosetta.adapters import http as http_mod
 
     monkeypatch.setattr(http_mod, "_open_cog_subset",
-                        lambda url, region, variable=None, fill_value=None:
+                        lambda url, region, variable=None, fill_value=None, timestamp=None:
                         _fake_cog_ds(*map(int, re.search(r"(\d{4})\.(\d{2})", url).groups())))
     sleeps = _stub_clock(monkeypatch)
 

@@ -184,7 +184,7 @@ def stub_opens(monkeypatch):
     """Serve a raster per URL, valued by the day-of-month in its filename."""
     calls = []
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         calls.append(url)
         day = int(url.split(".")[-2])
         return _raster(day)
@@ -231,7 +231,7 @@ def test_adapter_refuses_an_issuance_product_without_an_init(stub_opens):
 
 
 def test_adapter_raises_on_a_missing_file_by_default(monkeypatch):
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         if url.endswith("07.tif"):
             raise RuntimeError("404")
         return _raster(1)
@@ -244,7 +244,7 @@ def test_adapter_raises_on_a_missing_file_by_default(monkeypatch):
 def test_allow_partial_keeps_the_lead_axis_aligned(monkeypatch):
     """A missing lead must become NaN in place, not shift every later lead down
     by one — which would silently mislabel a 2-day forecast as a 1-day one."""
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         if url.endswith("06.tif"):
             raise RuntimeError("404")
         return _raster(int(url.split(".")[-2]))
@@ -268,7 +268,7 @@ def test_plain_time_series_products_are_untouched_by_the_issuance_branch(monkeyp
     file-pattern path exactly as it was."""
     opened = []
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         opened.append(url)
         return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
 
@@ -434,7 +434,7 @@ def test_month_pruning_downloads_only_the_requested_months(monkeypatch):
     rate-limited server."""
     opened = []
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         opened.append(url)
         return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
 
@@ -448,7 +448,7 @@ def test_month_pruning_downloads_only_the_requested_months(monkeypatch):
 def test_without_month_pruning_every_month_is_downloaded(monkeypatch):
     opened = []
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         opened.append(url)
         return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
 
@@ -460,7 +460,7 @@ def test_without_month_pruning_every_month_is_downloaded(monkeypatch):
 def test_month_pruning_does_not_touch_year_only_patterns(monkeypatch):
     opened = []
 
-    def fake_open(url, region, variable=None, fill_value=None):
+    def fake_open(url, region, variable=None, fill_value=None, timestamp=None):
         opened.append(url)
         return _raster(1).expand_dims(time=[np.datetime64("2020-01-01")])
 

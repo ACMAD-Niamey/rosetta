@@ -4,6 +4,7 @@ import tempfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -18,6 +19,54 @@ from ._robust import (
 
 
 _MAX_WORKERS = 8
+
+# Start day of each sub-monthly slice, so a filename's dekad/pentad index maps
+# to a real timestamp. Dekads: day 1/11/21. Pentads: day 1/6/11/16/21/26.
+_DEKAD_DAYS = (1, 11, 21)
+_PENTAD_DAYS = (1, 6, 11, 16, 21, 26)
+
+
+def _enumerate_timeseries(file_pattern, date_range, product_config):
+    """Return ``[(filename, timestamp)]`` for a time-series product.
+
+    ``timestamp`` is an explicit ``pd.Timestamp`` for sub-monthly cadences —
+    where the filename's dekad/pentad index (``{dekad}``/``{pentad}``) cannot be
+    unambiguously read back from the name — and ``None`` for monthly/yearly
+    files, whose timestamp the opener infers from the filename as before.
+
+    Month pruning via ``init_months`` applies to every sub-monthly cadence, so a
+    JJAS analysis fetches four months of dekads, not twelve.
+    """
+    import pandas as pd
+
+    if not date_range:
+        # No range: one recent file, accounting for observational lag.
+        recent = datetime.now().replace(day=1) - timedelta(days=60)
+        if "{dekad}" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month, dekad=1),
+                     pd.Timestamp(recent.year, recent.month, 1))]
+        if "{pentad}" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month, pentad=1),
+                     pd.Timestamp(recent.year, recent.month, 1))]
+        if "{month" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month), None)]
+        return [(file_pattern.format(year=recent.year), None)]
+
+    y0, y1 = date_range
+    months = product_config.get("init_months") or range(1, 13)
+
+    if "{dekad}" in file_pattern:
+        return [(file_pattern.format(year=y, month=m, dekad=d),
+                 pd.Timestamp(y, m, _DEKAD_DAYS[d - 1]))
+                for y in range(y0, y1 + 1) for m in months for d in (1, 2, 3)]
+    if "{pentad}" in file_pattern:
+        return [(file_pattern.format(year=y, month=m, pentad=p),
+                 pd.Timestamp(y, m, _PENTAD_DAYS[p - 1]))
+                for y in range(y0, y1 + 1) for m in months for p in range(1, 7)]
+    if "{month" in file_pattern:
+        return [(file_pattern.format(year=y, month=m), None)
+                for y in range(y0, y1 + 1) for m in months]
+    return [(file_pattern.format(year=y), None) for y in range(y0, y1 + 1)]
 
 
 def _resolve_max_workers(product_config, n_urls):
@@ -107,23 +156,27 @@ def _open_raster(url, region, variable=None, fill_value=None):
     return ds
 
 
-def _open_cog_subset(url, region, variable=None, fill_value=None):
-    """`_open_raster` plus a time coordinate inferred from the filename.
+def _open_cog_subset(url, region, variable=None, fill_value=None, timestamp=None):
+    """`_open_raster` plus a time coordinate.
 
-    Monthly/COG names carry YYYY.MM (e.g. chirps-v3.0.2020.01.cog); annual
-    rasters carry only the year (e.g. chirps-v2.0.2020.tif), in which case we
-    stamp January 1.
+    ``timestamp`` stamps the raster explicitly — needed for sub-monthly cadences
+    (a dekad/pentad index in the filename can't be read back unambiguously). When
+    it is ``None``, the timestamp is inferred from the filename: monthly/COG
+    names carry YYYY.MM (e.g. chirps-v3.0.2020.01.cog); annual rasters carry only
+    the year (e.g. chirps-v2.0.2020.tif), stamped January 1.
     """
     ds = _open_raster(url, region, variable=variable, fill_value=fill_value)
-    if "time" not in ds.dims:
-        m = re.search(r'(\d{4})\.(\d{2})', url)
-        if m:
-            ts = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")
-            ds = ds.expand_dims(time=[ts])
-        else:
-            ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
-            if ym:
-                ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
+    if "time" in ds.dims:
+        return ds
+    if timestamp is not None:
+        return ds.expand_dims(time=[pd.Timestamp(timestamp)])
+    m = re.search(r'(\d{4})\.(\d{2})', url)
+    if m:
+        ds = ds.expand_dims(time=[pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")])
+    else:
+        ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
+        if ym:
+            ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
     return ds
 
 
@@ -210,28 +263,13 @@ class HTTPAdapter(AdapterBase):
         if not file_pattern:
             raise ValueError("HTTP adapter requires 'file_pattern' in product config")
 
-        if date_range:
-            y0, y1 = date_range
-            if "{month" in file_pattern:
-                # A seasonal analysis needs four months of every year, not
-                # twelve. Downloading the other eight and discarding them costs
-                # three times the requests against a rate-limited server; for
-                # CHIRPS that is the difference between a pull and a ban.
-                months = product_config.get("init_months") or range(1, 13)
-                files = [file_pattern.format(year=y, month=m)
-                         for y in range(y0, y1 + 1) for m in months]
-            else:
-                files = [file_pattern.format(year=y) for y in range(y0, y1 + 1)]
-        else:
-            # Default to 2 months ago to account for observational data processing lag
-            from datetime import datetime, timedelta
-            recent = datetime.now().replace(day=1) - timedelta(days=60)
-            if "{month" in file_pattern:
-                files = [file_pattern.format(year=recent.year, month=recent.month)]
-            else:
-                files = [file_pattern.format(year=recent.year)]
+        # (filename, timestamp) pairs. timestamp is explicit for sub-monthly
+        # cadences (dekad/pentad), else None and inferred by the opener.
+        entries = _enumerate_timeseries(file_pattern, date_range, product_config)
+        base = base_url.rstrip("/")
+        urls = [f"{base}/{f}" for f, _ in entries]
+        stamps = [ts for _, ts in entries]
 
-        urls = [base_url.rstrip("/") + "/" + f for f in files]
         # NetCDF downloads run in a worker pool capped per-product (COG/TIF is
         # always sequential, so its worker count is 1).
         netcdf_workers = _resolve_max_workers(product_config, len(urls))
@@ -247,12 +285,14 @@ class HTTPAdapter(AdapterBase):
             fill_value = var_cfg.get("fill_value")
             datasets = []
             failures = []
-            for url in _iter(urls, "Rosetta HTTP download", enabled=progress):
+            for url, ts in _iter(list(zip(urls, stamps)), "Rosetta HTTP download",
+                                 enabled=progress):
                 rate_limiter.wait()
                 try:
                     ds = _with_retry(
-                        lambda u=url: _open_cog_subset(
-                            u, region, variable=native_name, fill_value=fill_value),
+                        lambda u=url, t=ts: _open_cog_subset(
+                            u, region, variable=native_name, fill_value=fill_value,
+                            timestamp=t),
                         max_retries, retry_backoff,
                         label=f"COG open {url}", verbose=verbose,
                     )

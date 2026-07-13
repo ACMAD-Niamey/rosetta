@@ -912,6 +912,53 @@ obs/chirps-v3-dekad:
     temporal: dekad
   notes: "Native UCSB CHIRPS v3.0 calendar dekad (10-day totals, mm). One NetCDF per year. Distinct from obs/chirps-v2-dekadal-rhiza (10-day ROLLING)."
 
+# CHIRPS v3 calendar-dekad GeoTIFFs (0.05°), one raster per dekad. Unlike the
+# whole-year NetCDF above (obs/chirps-v3-dekad), these are HTTP range-read per
+# region, so a region-cropped multi-decade climatology is a stream of small
+# reads rather than tens of GiB of downloads. The `{dekad}` field (1/2/3, the
+# 10-day slices starting day 1/11/21) is templated by the http adapter, which
+# stamps each raster's timestamp explicitly. Final (gauge-corrected) stream.
+obs/chirps-v3-dekad-tif:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/dekads/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.{dekad}.tif"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 10-day calendar dekad accumulation
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: dekad
+  notes: "CHIRPS v3.0 calendar-dekad GeoTIFFs (range-readable). Final stream; for the near-real-time tail use obs/chirps-v3-dekad-prelim."
+
+# Preliminary near-real-time dekad stream (~1-dekad lag), for the current season
+# before the final gauge-corrected product catches up. Same grid and format as
+# the final tif dekad above, different source directory.
+obs/chirps-v3-dekad-prelim:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/prelim/dekads/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.{dekad}.tif"
+  format: tif
+  request_interval: 3.0
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    forecast_range: [2024, null]   # rolling near-real-time feed; not a fixed archive
+    temporal: dekad
+  notes: "CHIRPS v3.0 PRELIMINARY calendar-dekad GeoTIFFs (~1-dekad lag). Use for the current season; splice onto obs/chirps-v3-dekad-tif for the completed record."
+
 obs/chirps-v3-annual:
   adapter: http
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/annual/global/tifs/"
