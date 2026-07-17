@@ -5,7 +5,7 @@ from nuthatch import cache
 
 from . import catalog
 from .adapters import get_adapter
-from .normalize import normalize
+from .normalize import normalize, sanitize_for_netcdf
 from .region import resolve_region
 
 from .storage import save
@@ -413,6 +413,11 @@ def fetch(product, variable, init=None, target=None, region=None,
             f"sources (e.g. station/tabular observations) don't support spatial "
             f"region selection — drop `region`, or use a gridded product."
         )
+
+    # Rebuild so the result round-trips through to_netcdf: OPeNDAP/CF sources carry
+    # bounds vars + stale encoding that otherwise raise "NetCDF: String match to name
+    # in use" on write (in the returned object as well as the save() path below).
+    clean = sanitize_for_netcdf(clean)
 
     if destination:
         _log(verbose, f"saving output -> {destination}")

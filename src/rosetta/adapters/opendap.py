@@ -1,7 +1,7 @@
 import numpy as np
 import xarray as xr
 from .base import AdapterBase
-from ..normalize import decode_months_since
+from ..normalize import decode_months_since, select_lon
 from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
 
 
@@ -213,9 +213,11 @@ class OPeNDAPAdapter(AdapterBase):
             # ascending `slice` select nothing at all — silently, and with no
             # error. Sort first so the slice means what it says.
             ds = _sort_ascending(ds, lat_name, lon_name)
-            ds = ds.sel(
-                {lat_name: slice(lat_s, lat_n), lon_name: slice(lon_w, lon_e)}
-            )
+            # Longitude selection is convention-aware (−180..180 vs 0..360) and
+            # wrap-safe; a naive slice(lon_w, lon_e) silently under-selects when the
+            # request and the source disagree on convention. See normalize.select_lon.
+            ds = ds.sel({lat_name: slice(lat_s, lat_n)})
+            ds = select_lon(ds, lon_w, lon_e, lon_name=lon_name)
 
         if obs_years is not None:
             max_years = int(product_config.get(
