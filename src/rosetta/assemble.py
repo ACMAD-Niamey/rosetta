@@ -43,3 +43,34 @@ def assemble(roster, variable, *, init, target, region=None, grid_res=None,
         fcst = _canonicalize(fetch(product, variable, **common)[variable])
         out[label] = (hcst, fcst)
     return out
+
+
+def obs_predictor(product, variable, *, target, hindcast, forecast_year,
+                  region=None, grid_res=None, regrid_to=None, seasonal="mean",
+                  boundary="center", cache=True, verbose=True):
+    """Use an OBSERVED gridded field as a seasonal predictor: `(hindcast, forecast)`.
+
+    The generic "observed-field-as-predictor" step — the lagged/persistence
+    predictor a CCA can be built on (e.g. observed ERSSTv5 SST predicting a later
+    rainfall season, ACMAD's Exp-1). Model forecasts go through `assemble`; this is
+    its observations counterpart, returning the SAME canonical
+    `(year, member, lat, lon)` pair so an obs predictor drops into
+    `deepscale.seasonal_mme`'s `predictor_tracks` exactly like a model.
+
+    Parameters mirror `assemble`/`fetch`: `target` is the season, `hindcast` the
+    `(start, end)` training window, `forecast_year` the year to predict from.
+    Observations carry no init/lead — the season is selected by `seasonal` (mean
+    over the target months), so both the training series and the single forecast
+    year come from the same observed product.
+
+    Returns `(hindcast, forecast)`; `forecast` is the `forecast_year` slice
+    (`year=[forecast_year]`, `member=[0]`).
+    """
+    common = dict(target=target, region=region, grid_res=grid_res,
+                  regrid_to=regrid_to, seasonal=seasonal, cache=cache,
+                  verbose=verbose, boundary=boundary)
+    y0, y1 = hindcast
+    hcst = _canonicalize(fetch(product, variable, hindcast=(y0, y1), **common)[variable])
+    fcst = _canonicalize(
+        fetch(product, variable, hindcast=(forecast_year, forecast_year), **common)[variable])
+    return hcst, fcst

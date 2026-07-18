@@ -1446,3 +1446,56 @@ nmme/cansipsic4:
 
 nmme/cansipsic4-hindcast:
   alias_of: "nmme/cansipsic4"   # deprecated: hindcast is the same product, hindcast stream
+
+# ============================================================================
+# ACMAD predictands (added on the `acmad` branch — ACMAD seasonal-forecast
+# replication). The two observed rainfall fields ACMAD's operational CPT/CCA
+# outlook is calibrated against. Both are OBSERVED gridded series (predictands),
+# not forecasts — no init/lead. Season selection is done downstream via
+# fetch(..., seasonal=...); coarsen with grid_res=/regrid_to= for CCA.
+# ============================================================================
+
+# NOAA CPC CAMS-OPI merged gauge+satellite rainfall — ACMAD's primary predictand.
+# Observed monthly T-series on the IRI Data Library; uses the iridl adapter's
+# `observed: true` path (plain T grid, no S/L). Served ~2.5deg native; the
+# reproduction used it on the 0.5deg Africa grid (rosetta grid_res=0.5).
+obs/camsopi:
+  adapter: iridl
+  observed: true
+  iridl_path: "SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208"
+  variables:
+    precip:
+      iridl_name: prcp
+      native_name: prcp
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -999.0
+  grid:
+    lat_res: 2.5
+    lon_res: 2.5
+    hindcast_range: [1979, 2025]
+    temporal: monthly
+  notes: "NOAA CPC CAMS-OPI v0208 merged rainfall. ACMAD CPT/CCA predictand (obs)."
+
+# TAMSAT v3.1 monthly rainfall (Univ. Reading) — ACMAD's second (land-only)
+# predictand. JASMIN public HTTP, one NetCDF per month. Native 0.0375deg over
+# Africa (~3.7M cells) — far too fine for CCA; coarsen (grid_res=0.5 /
+# regrid_to=) as the reproduction did.
+obs/tamsat:
+  adapter: http
+  source_url: "https://gws-access.jasmin.ac.uk/public/tamsat/rfe/data/v3.1/monthly"
+  file_pattern: "{year}/{month:02d}/rfe{year}_{month:02d}.v3.1.nc"
+  format: netcdf
+  request_interval: 0.5
+  variables:
+    precip:
+      native_name: rfe
+      units: "mm/month"
+      target_units: "mm/month"
+      fill_value: -999.0
+  grid:
+    lat_res: 0.0375
+    lon_res: 0.0375
+    hindcast_range: [1983, 2025]
+    temporal: monthly
+  notes: "TAMSAT v3.1 monthly RFE (Reading), JASMIN public. Land-only; coarsen for CCA."

@@ -1,0 +1,38 @@
+"""rosetta.obs_predictor: observed field as a seasonal CCA predictor.
+
+Added on the `acmad` branch. Uses a monkeypatched fetch (no network) to check the
+canonical (year, member, lat, lon) shaping and the hindcast/forecast-year split.
+"""
+import importlib
+import numpy as np
+import xarray as xr
+import rosetta
+
+assemble_mod = importlib.import_module("rosetta.assemble")  # the module, not the fn
+
+
+def _fake_fetch(product, variable, *, hindcast, **kw):
+    """Stand in for fetch(seasonal='mean'): a (year, lat, lon) obs season field."""
+    y0, y1 = hindcast
+    years = np.arange(y0, y1 + 1)
+    lat = np.array([-2.0, 0.0, 2.0])
+    lon = np.array([10.0, 12.0])
+    data = np.random.default_rng(0).random((len(years), len(lat), len(lon)))
+    da = xr.DataArray(data, dims=("year", "lat", "lon"),
+                      coords={"year": years, "lat": lat, "lon": lon}, name=variable)
+    return xr.Dataset({variable: da})
+
+
+def test_obs_predictor_shapes_and_forecast_split(monkeypatch):
+    monkeypatch.setattr(assemble_mod, "fetch", _fake_fetch)
+    hcst, fcst = rosetta.obs_predictor(
+        "obs/ersst-v5", "sst", target="ASO",
+        hindcast=(1991, 2020), forecast_year=2026, region=[-35, 35, 0, 360])
+
+    # Canonical predictor shape, ready for deepscale.seasonal_mme tracks.
+    assert hcst.dims == ("year", "member", "lat", "lon")
+    assert fcst.dims == ("year", "member", "lat", "lon")
+    # Hindcast spans the training window; forecast is the single forecast year.
+    assert list(hcst.year.values) == list(range(1991, 2021))
+    assert list(fcst.year.values) == [2026]
+    assert hcst.sizes["member"] == 1 and fcst.sizes["member"] == 1

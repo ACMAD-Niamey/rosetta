@@ -30,6 +30,72 @@ def _read_dlauth():
         return json.loads(f.read())["key"]
 
 
+def build_url_parts(product_config, variable, date_range=None, region=None):
+    """Build the ordered Ingrid URL path segments for an IRIDL request.
+
+    Pure (no I/O) so it is unit-testable. Two shapes are produced:
+
+    * forecast products (default): an ``S`` (init) / ``L`` (lead) cube, selecting
+      the init month and averaging over the target leads — the seasonal-GCM path.
+    * observed products (``observed: true`` in the entry): a plain ``T`` time
+      series over the requested year span, with no init/lead dims — the path an
+      observed gridded field (e.g. CAMS-OPI rainfall) needs. Month/season
+      selection then happens downstream in ``fetch`` via ``seasonal=``.
+
+    Returns the list of path segments (join with "/" and append "/data.nc").
+    """
+    var_cfg = product_config["variables"][variable]
+    iridl_path = product_config["iridl_path"]
+    iridl_var = var_cfg.get("iridl_name", var_cfg.get("native_name"))
+    observed = bool(product_config.get("observed", False))
+
+    parts = [f"{IRIDL_BASE}/{iridl_path}/.{iridl_var}"]
+
+    if observed:
+        # Observed T-series: restrict the time grid to the year span. Ingrid reads
+        # the calendar tokens; RANGEEDGES clips inclusively. normalize() renames
+        # T->time, X->lon, Y->lat downstream.
+        if date_range:
+            y0, y1 = date_range
+            parts.append(f"T/%28Jan%20{y0}%29/%28Dec%20{y1}%29/RANGEEDGES")
+        if region:
+            lat_s, lat_n, lon_w, lon_e = region
+            parts.append(f"Y/{lat_s}/{lat_n}/RANGEEDGES")
+            parts.append(f"X/{lon_w}/{lon_e}/RANGEEDGES")
+        if "iridl_unit_ops" in var_cfg:
+            parts.append(var_cfg["iridl_unit_ops"])
+        return parts
+
+    # Forecast (S/L) path.
+    init_month = product_config.get("init_months", [1])[0]
+    mon = THREELETTERS[init_month]
+    if date_range:
+        y0, y1 = date_range
+        parts.append(f"S/%280000%201%20{mon}%20{y0}-{y1}%29/VALUES")
+    else:
+        import datetime
+        y = datetime.datetime.now().year
+        parts.append(f"S/%280000%201%20{mon}%20{y}%29/VALUES")
+
+    if "leadtime_range" in product_config:
+        lo, hi = product_config["leadtime_range"]
+        parts.append(f"L/{lo}/{hi}/RANGEEDGES")
+    elif "leadtime_month" in product_config:
+        lms = product_config["leadtime_month"]
+        lo = min(lms) - 0.5
+        hi = max(lms) + 0.5
+        parts.append(f"L/{lo}/{hi}/RANGEEDGES")
+    parts.append("%5BL%5D//keepgrids/average")
+
+    if region:
+        lat_s, lat_n, lon_w, lon_e = region
+        parts.append(f"Y/{lat_s}/{lat_n}/RANGEEDGES")
+        parts.append(f"X/{lon_w}/{lon_e}/RANGEEDGES")
+    if "iridl_unit_ops" in var_cfg:
+        parts.append(var_cfg["iridl_unit_ops"])
+    return parts
+
+
 class IRIDLAdapter(AdapterBase):
     def health_check(self, product_config, probe_remote=False):
         if not DLAUTH_PATH.is_file():
@@ -50,50 +116,10 @@ class IRIDLAdapter(AdapterBase):
         verbose = product_config.get("_verbose", True)
         key = _read_dlauth()
         var_cfg = product_config["variables"][variable]
-        iridl_path = product_config["iridl_path"]
-        iridl_var = var_cfg["iridl_name"]
+        iridl_var = var_cfg.get("iridl_name", var_cfg.get("native_name"))
 
-        init_month = product_config.get("init_months", [1])[0]
-        mon = THREELETTERS[init_month]
-
-        # Build Ingrid URL
-        parts = [f"{IRIDL_BASE}/{iridl_path}/.{iridl_var}"]
-
-        # Year range
-        if date_range:
-            y0, y1 = date_range
-            parts.append(f"S/%280000%201%20{mon}%20{y0}-{y1}%29/VALUES")
-        else:
-            import datetime
-            y = datetime.datetime.now().year
-            parts.append(f"S/%280000%201%20{mon}%20{y}%29/VALUES")
-
-        # Lead time filtering
-        if "leadtime_range" in product_config:
-            lo, hi = product_config["leadtime_range"]
-            parts.append(f"L/{lo}/{hi}/RANGEEDGES")
-        elif "leadtime_month" in product_config:
-            # Convert CDS-style leadtime_months to IRI L-values (0-indexed + 0.5)
-            lms = product_config["leadtime_month"]
-            lo = min(lms) - 0.5
-            hi = max(lms) + 0.5
-            parts.append(f"L/{lo}/{hi}/RANGEEDGES")
-
-        # Average over lead times
-        parts.append("%5BL%5D//keepgrids/average")
-
-        # Region
-        if region:
-            lat_s, lat_n, lon_w, lon_e = region
-            parts.append(f"Y/{lat_s}/{lat_n}/RANGEEDGES")
-            parts.append(f"X/{lon_w}/{lon_e}/RANGEEDGES")
-
-        # Unit conversion
-        if "iridl_unit_ops" in var_cfg:
-            parts.append(var_cfg["iridl_unit_ops"])
-
-        # Request as OPeNDAP
-        url = "/".join(parts) + "/dods"
+        # Build Ingrid URL (forecast S/L cube or observed T-series — see builder).
+        parts = build_url_parts(product_config, variable, date_range, region)
 
         if verbose:
             print(f"[rosetta:iridl] fetching {iridl_var} ({date_range})")
