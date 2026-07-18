@@ -134,6 +134,11 @@ def select_lon(ds, lon_w, lon_e, lon_name="lon"):
     if lon_name not in ds.dims or ds.sizes.get(lon_name, 0) == 0:
         return ds
     lon = ds[lon_name].values
+    # slice(...) needs a monotonic index; a seam-crossing region selected upstream
+    # (e.g. by the adapter) can arrive non-monotonic. Sort ascending first.
+    if lon.size > 1 and not (np.all(np.diff(lon) > 0) or np.all(np.diff(lon) < 0)):
+        ds = ds.sortby(lon_name)
+        lon = ds[lon_name].values
     lo, hi = float(np.nanmin(lon)), float(np.nanmax(lon))
 
     # Full-globe request -> keep everything (this is the −180..180 vs 0..360 footgun).
