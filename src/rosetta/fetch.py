@@ -112,6 +112,31 @@ def _daily_issuance_key(init):
     return None
 
 
+def _match_lon_convention(obj, target_lons):
+    """Roll `obj`'s longitude into the target grid's convention before interpolation.
+
+    Interpolating a 0..360 source onto a target grid that includes negative
+    longitudes (e.g. an Africa grid spanning -25..55) silently NaNs the western
+    band, because the source has no coordinates at negative longitudes. Shift the
+    source into the target's convention (0..360 <-> -180..180) and re-sort so the
+    interpolation covers the whole target.
+    """
+    if "lon" not in getattr(obj, "coords", {}):
+        return obj
+    lon = np.asarray(obj["lon"].values, dtype=float)
+    if lon.size == 0:
+        return obj
+    t_min, t_max = float(np.min(target_lons)), float(np.max(target_lons))
+    s_min, s_max = float(np.min(lon)), float(np.max(lon))
+    if t_min < 0.0 and s_max > 180.0:          # target -180..180, source 0..360
+        obj = obj.assign_coords(lon=(((obj["lon"] + 180.0) % 360.0) - 180.0))
+        return obj.sortby("lon")
+    if t_max > 180.0 and s_min < 0.0:          # target 0..360, source -180..180
+        obj = obj.assign_coords(lon=(obj["lon"] % 360.0))
+        return obj.sortby("lon")
+    return obj
+
+
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
@@ -398,8 +423,10 @@ def fetch(product, variable, init=None, target=None, region=None,
         lat_s, lat_n, lon_w, lon_e = region
         lats = np.arange(lat_s, lat_n + grid_res / 2.0, grid_res)
         lons = np.arange(lon_w, lon_e + grid_res / 2.0, grid_res)
+        clean = _match_lon_convention(clean, lons)
         clean = clean.interp(lat=lats, lon=lons)
     if regrid_to is not None:
+        clean = _match_lon_convention(clean, regrid_to.lon.values)
         clean = clean.interp(lat=regrid_to.lat.values, lon=regrid_to.lon.values)
 
     # A region was requested but the source isn't spatially griddable (e.g.
