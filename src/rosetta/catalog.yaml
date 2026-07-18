@@ -1449,33 +1449,13 @@ nmme/cansipsic4-hindcast:
 
 # ============================================================================
 # ACMAD predictands (added on the `acmad` branch — ACMAD seasonal-forecast
-# replication). The two observed rainfall fields ACMAD's operational CPT/CCA
-# outlook is calibrated against. Both are OBSERVED gridded series (predictands),
-# not forecasts — no init/lead. Season selection is done downstream via
-# fetch(..., seasonal=...); coarsen with grid_res=/regrid_to= for CCA.
+# replication). Observed rainfall the CPT/CCA outlook is calibrated against, from
+# NATIVE data stores (NOAA PSL / JASMIN) — no IRI Data Library dependency. Both
+# are OBSERVED gridded series: season selection is done downstream via
+# fetch(..., seasonal=...); coarsen with grid_res=/regrid_to= for CCA. The
+# CPC-merged-precip predictand is obs/cmap (below, NOAA PSL OpenDAP) — the
+# natively-served member of the CAMS-OPI lineage.
 # ============================================================================
-
-# NOAA CPC CAMS-OPI merged gauge+satellite rainfall — ACMAD's primary predictand.
-# Observed monthly T-series on the IRI Data Library; uses the iridl adapter's
-# `observed: true` path (plain T grid, no S/L). Served ~2.5deg native; the
-# reproduction used it on the 0.5deg Africa grid (rosetta grid_res=0.5).
-obs/camsopi:
-  adapter: iridl
-  observed: true
-  iridl_path: "SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208/.mean"
-  variables:
-    precip:
-      iridl_name: prcp
-      native_name: prcp
-      units: "mm/day"
-      target_units: "mm/day"
-      fill_value: -999.0
-  grid:
-    lat_res: 2.5
-    lon_res: 2.5
-    hindcast_range: [1979, 2025]
-    temporal: monthly
-  notes: "NOAA CPC CAMS-OPI v0208 merged rainfall. ACMAD CPT/CCA predictand (obs)."
 
 # TAMSAT v3.1 monthly rainfall (Univ. Reading) — ACMAD's second (land-only)
 # predictand. JASMIN public HTTP, one NetCDF per month. Native 0.0375deg over
@@ -1499,3 +1479,27 @@ obs/tamsat:
     hindcast_range: [1983, 2025]
     temporal: monthly
   notes: "TAMSAT v3.1 monthly RFE (Reading), JASMIN public. Land-only; coarsen for CCA."
+
+# CPC Merged Analysis of Precipitation (CMAP), standard gauge+satellite merge —
+# the natively-served NetCDF member of the CPC merged-precip lineage that ACMAD's
+# IRIDL-only CAMS-OPI belongs to. NOAA PSL THREDDS/OpenDAP (whole-file), 2.5deg
+# monthly, no auth and no IRIDL. Chunk reads (max_request_years) to dodge the DAP
+# truncation the PSL server does on long requests (same as ERSSTv5). Coarsen with
+# grid_res=/regrid_to= for the forecast grid.
+obs/cmap:
+  adapter: opendap
+  source_url: "https://psl.noaa.gov/thredds/dodsC/Datasets/cmap/std/precip.mon.mean.nc"
+  url_template: "{base}"
+  decode_times: true
+  max_request_years: 5
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 2.5
+    lon_res: 2.5
+    hindcast_range: [1979, 2026]
+    temporal: monthly
+  notes: "CPC CMAP standard (gauge+satellite) monthly precip, 2.5deg. NOAA PSL, no IRIDL. CAMS-OPI-lineage predictand."
