@@ -11,7 +11,7 @@ def test_camsopi_registered_as_observed_iridl():
     c = catalog.get("obs/camsopi")
     assert c["adapter"] == "iridl"
     assert c.get("observed") is True
-    assert c["iridl_path"].endswith("CAMS_OPI/.v0208")
+    assert "CAMS_OPI/.v0208" in c["iridl_path"]
     assert c["variables"]["precip"]["native_name"] == "prcp"
 
 
@@ -29,7 +29,7 @@ def test_iridl_observed_url_is_a_plain_T_series():
         catalog.get("obs/camsopi"), "precip",
         date_range=(1991, 2020), region=[-40.0, 40.0, -25.0, 55.0])
     url = "/".join(parts)
-    assert "CAMS_OPI/.v0208/.prcp" in url
+    assert "CAMS_OPI/.v0208/.mean/.prcp" in url
     assert "/T/" in url and "1991" in url and "2020" in url
     assert "/S/" not in url and "/L/" not in url          # no forecast init/lead
     assert "Y/-40.0/40.0/RANGEEDGES" in url

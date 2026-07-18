@@ -1462,7 +1462,7 @@ nmme/cansipsic4-hindcast:
 obs/camsopi:
   adapter: iridl
   observed: true
-  iridl_path: "SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208"
+  iridl_path: "SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208/.mean"
   variables:
     precip:
       iridl_name: prcp

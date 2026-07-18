@@ -19,8 +19,13 @@ THREELETTERS = {
 }
 
 
-def _read_dlauth():
+def _read_dlauth(required=True):
+    """Read the IRI auth key. Many IRIDL datasets (e.g. CAMS-OPI) are public and
+    need no key; pass ``required=False`` to return None instead of raising when
+    ``~/.pycpt_dlauth`` is absent."""
     if not DLAUTH_PATH.is_file():
+        if not required:
+            return None
         raise FileNotFoundError(
             "No ~/.pycpt_dlauth found. Create an IRI account at "
             "https://iridl.ldeo.columbia.edu/auth/signup and run "
@@ -114,7 +119,9 @@ class IRIDLAdapter(AdapterBase):
 
     def fetch_data(self, product_config, variable, date_range=None, region=None):
         verbose = product_config.get("_verbose", True)
-        key = _read_dlauth()
+        # Observed public datasets (CAMS-OPI etc.) don't require an auth key;
+        # restricted forecast routes do. Absent key on a public route -> anonymous.
+        key = _read_dlauth(required=not product_config.get("observed", False))
         var_cfg = product_config["variables"][variable]
         iridl_var = var_cfg.get("iridl_name", var_cfg.get("native_name"))
 
@@ -136,10 +143,11 @@ class IRIDLAdapter(AdapterBase):
             )
             wrote_dodsrc = True
 
-        # Use requests session with auth cookie for download
+        # Use requests session with auth cookie for download (anonymous if no key)
         import requests
         session = requests.Session()
-        session.cookies.set("__dlauth_id", key, domain="iridl.ldeo.columbia.edu")
+        if key:
+            session.cookies.set("__dlauth_id", key, domain="iridl.ldeo.columbia.edu")
 
         # Download as NetCDF instead of OPeNDAP (simpler auth handling)
         nc_url = "/".join(parts) + "/data.nc"
@@ -153,10 +161,15 @@ class IRIDLAdapter(AdapterBase):
                 "IRIDL returned HTML (auth failure?). Check ~/.pycpt_dlauth."
             )
 
+        # Observed IRIDL series (e.g. CAMS-OPI) carry a "months since ..." T axis
+        # on a 360-day calendar that xarray cannot CF-decode; open raw and let
+        # normalize()'s _decode_numeric_times handle it. Forecast cubes decode fine.
+        decode_times = product_config.get(
+            "decode_times", not product_config.get("observed", False))
         with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp.write(resp.content)
             tmp.flush()
-            ds = xr.open_dataset(tmp.name)
+            ds = xr.open_dataset(tmp.name, decode_times=decode_times)
 
         if verbose:
             print(f"[rosetta:iridl] got {dict(ds.sizes)}")
