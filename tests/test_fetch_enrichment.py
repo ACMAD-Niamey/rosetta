@@ -36,11 +36,38 @@ def test_seasonal_mean_collapses_months_to_year(monkeypatch):
     assert list(ds["precip"].year.values) == [1993, 1994, 1995]
 
 
-def test_seasonal_mean_rejects_wraparound_season(monkeypatch):
-    _patch_fetch_internals(monkeypatch)
-    with pytest.raises(NotImplementedError, match="wraparound"):
-        rosetta.fetch("obs/chirps-v2-monthly", "precip", target="NDJ",
-                      region=[-2, 2, 20, 24], seasonal="mean", cache=False, verbose=False)
+def test_seasonal_mean_wraparound_shifts_year_and_drops_incomplete(monkeypatch):
+    # Monthly data Jan 1993 .. Dec 1995; value encodes year + month/100 so the test
+    # verifies BOTH the month selection and the season-year labelling.
+    import sys
+    t = xr.cftime_range("1993-01", periods=36, freq="MS", calendar="standard")
+    lat, lon = np.arange(-2, 3.0, 1.0), np.arange(20, 25.0, 1.0)
+    vals = (np.array([tt.year + tt.month / 100.0 for tt in t])[:, None, None]
+            * np.ones((1, lat.size, lon.size)))
+    toy = xr.DataArray(vals, dims=("time", "lat", "lon"),
+                       coords={"time": t, "lat": lat, "lon": lon})
+    import rosetta.fetch as _  # ensure imported
+    fetchmod = sys.modules["rosetta.fetch"]
+    monkeypatch.setattr(fetchmod, "_fetch_raw_cached",
+                        lambda *a, **k: xr.Dataset({"precip": toy}))
+    monkeypatch.setattr(fetchmod, "normalize", lambda ds, *a, **k: ds)
+    fake = type("FakeAdapter", (), {
+        "fetch_data": staticmethod(lambda *a, **k: xr.Dataset({"precip": toy}))})()
+    monkeypatch.setattr(fetchmod, "get_adapter", lambda name: fake)
+
+    ds = rosetta.fetch("obs/chirps-v2-monthly", "precip", target="NDJ",
+                       region=[-2, 2, 20, 24], seasonal="mean", cache=False, verbose=False)
+    da = ds["precip"]
+    # NDJ = Nov, Dec, Jan; the season is labelled by its Nov/Dec year, so the Jan
+    # value shifts back one year. Within Jan1993..Dec1995 only 1993 and 1994 are
+    # complete seasons (1992 has only Jan1993; 1995 lacks Jan1996) -> both dropped.
+    assert "year" in da.dims and "time" not in da.dims
+    assert da.year.dtype.kind == "i"                 # season year stays integer
+    assert list(da.year.values) == [1993, 1994]
+    exp_1993 = (1993.11 + 1993.12 + 1994.01) / 3.0   # Nov1993, Dec1993, Jan1994
+    exp_1994 = (1994.11 + 1994.12 + 1995.01) / 3.0
+    np.testing.assert_allclose(float(da.sel(year=1993).mean()), exp_1993, atol=1e-6)
+    np.testing.assert_allclose(float(da.sel(year=1994).mean()), exp_1994, atol=1e-6)
 
 
 def test_grid_res_and_regrid_to_are_mutually_exclusive(monkeypatch):
