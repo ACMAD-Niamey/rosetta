@@ -38,7 +38,7 @@ Then Claude uses it automatically when a task involves rosetta, or invoke it exp
 
 **Claude API:** upload the directory via the Skills API (`/v1/skills`) and attach it to a container-use request; see the Anthropic docs for the current mechanism.
 
-**Other agentskills.io-compatible harnesses:** copy the `rosetta/` directory into wherever that runtime discovers skills — the format (SKILL.md + frontmatter) is harness-agnostic by design. Any agent without native skill support can simply be told to read `skills/rosetta/SKILL.md` first.
+**Codex, OpenCode, and other agent coding frameworks:** the format (SKILL.md + frontmatter) is harness-agnostic by design, and any agentskills.io-compatible runtime can consume it — copy the `rosetta/` directory into wherever that framework discovers skills (e.g. Codex and OpenCode both read `AGENTS.md`-style project instructions and can be pointed at skill directories). For any agent without native skill support, simply add an instruction to its project config (`AGENTS.md`, system prompt, etc.) to read `skills/rosetta/SKILL.md` before working with rosetta.
 
 **Humans:** the same files work as documentation — start with `SKILL.md`.
 
