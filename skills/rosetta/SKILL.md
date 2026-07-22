@@ -83,7 +83,20 @@ Three forms (see [references/api.md](references/api.md) for details):
 2. **shapefile path** ending `.shp` — needs `[geo]` extra; reprojected to EPSG:4326 and dissolved; bbox drives the upstream request, polygon applied as a final NaN mask.
 3. **geometry** — bare shapely geometry (assumed EPSG:4326) or GeoSeries/GeoDataFrame.
 
-There are **no named built-in regions**. For country boundaries use `scripts/fetch_country_shapefiles.py` (geoBoundaries ADM0). Polygons crossing the antimeridian are not handled — split them first. Requesting a `region` on a non-gridded product raises `ValueError`.
+There are **no named built-in regions**. For country boundaries, pull ADM0 polygons from geoBoundaries (gbOpen, CC BY 4.0) and pass the geometry straight to `region=` — no shapefile on disk required (needs the `[geo]` extra):
+
+```python
+import geopandas as gpd
+
+ISO3 = "KEN"
+url = ("https://github.com/wmgeolab/geoBoundaries/raw/main/releaseData/"
+       f"gbOpen/{ISO3}/ADM0/geoBoundaries-{ISO3}-ADM0_simplified.geojson")
+kenya = gpd.read_file(url).to_crs("EPSG:4326")
+
+ds = fetch("nmme/cfsv2", "precip", init="2024-02", target="MAM", region=kenya)
+```
+
+The repo ships `fetch_country_shapefiles.py` under its `scripts/` directory, which does the same thing and writes `.shp` files, if you have the checkout and want them on disk. Polygons crossing the antimeridian are not handled — split them first. Requesting a `region` on a non-gridded product raises `ValueError`.
 
 ## Caching
 
