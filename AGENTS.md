@@ -14,7 +14,7 @@ The skill is a snapshot of the source. Any change that alters observable behavio
 |---|---|
 | `fetch()` / `assemble()` signatures, defaults, or behavior | `skills/rosetta/SKILL.md` + `skills/rosetta/references/api.md` |
 | `catalog.yaml` (add/remove/deprecate products, variables, adapters) | `skills/rosetta/references/products.md` |
-| `normalize.py` (renames, unit conversions, pipeline order) | `skills/rosetta/references/data-conventions.md` |
+| `normalize.py` (renames, unit conversions, pipeline order) | `skills/rosetta/references/data-conventions.md` (+ `plotting.md` if dims/units/orientation guarantees change) |
 | Caching (`_CACHE_VERSION`, cache keys, env vars, nuthatch config) | `skills/rosetta/references/troubleshooting.md` |
 | Credentials/adapters (new source, auth flow, rate limits) | `skills/rosetta/references/products.md` + `troubleshooting.md` |
 | Anything user-facing | `README.md` if it covers the topic |

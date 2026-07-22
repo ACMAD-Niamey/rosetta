@@ -1,6 +1,6 @@
 ---
 name: rosetta
-description: Fetch and normalize seasonal/sub-seasonal climate data (NMME, C3S/Copernicus, ERA5, CHIRPS, IMERG, S2S) into canonical CF-aligned xarray Datasets using the accord-rosetta Python package. Use when fetching climate model hindcasts/forecasts or observations, assembling multi-model ensembles, clipping to regions/shapefiles, regridding, managing the rosetta cache, or debugging CDS/ECDS/IRI credentials and product errors.
+description: Fetch and normalize seasonal/sub-seasonal climate data (NMME, C3S/Copernicus, ERA5, CHIRPS, IMERG, S2S) into canonical CF-aligned xarray Datasets using the accord-rosetta Python package. Use when fetching climate model hindcasts/forecasts or observations, assembling multi-model ensembles, clipping to regions/shapefiles, regridding, plotting quick-look maps of fetched fields, managing the rosetta cache, or debugging CDS/ECDS/IRI credentials and product errors.
 license: MIT
 metadata:
   author: accord-research
@@ -136,10 +136,12 @@ check_product("obs/era5", probe_remote=True) # also pings the live source
 - [examples/multi_model_assemble.py](examples/multi_model_assemble.py) — `assemble()` roster → deepscale-ready arrays
 - [examples/shapefile_region.py](examples/shapefile_region.py) — country clipping, center vs cover
 - [examples/s2s_fetch.py](examples/s2s_fetch.py) — sub-seasonal issuance + on-the-fly reforecasts
+- [examples/quick_look.py](examples/quick_look.py) — cartopy map, ensemble facets, weighted time series
 
 ## Reference files
 
 - [references/api.md](references/api.md) — complete API: `fetch`, `assemble`, `parse_target`/`parse_init`, `catalog`, health, `validate`, `storage`, CLI
 - [references/products.md](references/products.md) — every product id with adapter, variables, resolution, credentials
 - [references/data-conventions.md](references/data-conventions.md) — the normalization pipeline step by step, unit conversion table, season strings
+- [references/plotting.md](references/plotting.md) — visualizing fetched data: quick-look maps (cartopy), colormap/units conventions, ensemble facets, area-weighted time series, region overlays
 - [references/troubleshooting.md](references/troubleshooting.md) — errors, credentials setup, rate limits, cache issues

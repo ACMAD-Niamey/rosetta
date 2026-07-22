@@ -13,6 +13,7 @@ rosetta/
 │   ├── api.md                    # complete API reference
 │   ├── products.md               # every product id, adapter, credentials
 │   ├── data-conventions.md       # normalization pipeline, units, dims
+│   ├── plotting.md               # quick-look maps, facets, time series
 │   └── troubleshooting.md        # credentials setup, errors, cache issues
 └── examples/                     # runnable scripts
 ```
