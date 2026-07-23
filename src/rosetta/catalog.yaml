@@ -133,6 +133,8 @@ nmme/ccsm4:
 # acc.ord S3 archive (nmme/cesm1-hindcast, now a deprecated alias) to CCSR.
 nmme/cesm1:
   adapter: ccsr
+  single_year_fetch: true   # per-year DAP requests; the full-range hindcast request overflows the
+                            # CCSR server and silently zero-fills (matches ccsm4). See safe_fetch.
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CESM1"
   variables:
     precip:
@@ -157,6 +159,8 @@ nmme/cesm1:
 
 nmme/geoss2s:
   adapter: ccsr
+  single_year_fetch: true   # per-year DAP requests; the full-range hindcast request overflows the
+                            # CCSR server and silently zero-fills (matches ccsm4). See safe_fetch.
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NASA-GMAO/GEOSS2S"
   split_streams: true
   variables:

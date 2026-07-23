@@ -5,6 +5,7 @@ from nuthatch import cache
 
 from . import catalog
 from .adapters import get_adapter
+from .adapters._robust import reject_if_degenerate, DegenerateResponseError
 from .normalize import normalize, sanitize_for_netcdf
 from .region import resolve_region
 
@@ -14,10 +15,19 @@ _CACHE_VERSION = 5  # bump when adapter logic or normalization changes
 
 
 def _fetch_raw(product: str, variable: str, config: dict,
-               date_range, region) -> xr.Dataset:
-    """Download raw (un-normalized) data from the adapter. Cached by _fetch_raw_cached."""
+               date_range, region, reject_degenerate: bool = False) -> xr.Dataset:
+    """Download raw (un-normalized) data from the adapter. Cached by _fetch_raw_cached.
+
+    When ``reject_degenerate`` is set (opt-in, via ``fetch(degenerate_attempts>1)``), a
+    bitwise-constant / zero-filled response is rejected here — before it can be memoized — so a
+    truncated DAP packet never poisons the cache, for any adapter. Off by default so mechanics
+    that legitimately use constant fields (and callers who don't opt in) are unaffected. all-NaN
+    is tolerated (a land-masked region can legitimately be all-NaN)."""
     adapter = get_adapter(config["adapter"])
-    return adapter.fetch_data(config, variable, date_range=date_range, region=region)
+    ds = adapter.fetch_data(config, variable, date_range=date_range, region=region)
+    if reject_degenerate:
+        reject_if_degenerate(ds, variable, f"rosetta.fetch({product!r})", reject_all_nan=False)
+    return ds
 
 
 @cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic",
@@ -25,15 +35,18 @@ def _fetch_raw(product: str, variable: str, config: dict,
                    "init_date"])
 def _fetch_raw_cached(product: str, variable: str, config: dict,
                       date_range, region, init_months=None,
-                      init_date=None) -> xr.Dataset:
+                      init_date=None, reject_degenerate=False) -> xr.Dataset:
     """Nuthatch-cached wrapper around _fetch_raw.
 
     Cache key uses only the stable scalar arguments, not the full config dict,
     to avoid dict-hashing issues. init_months is included because it determines
     which seasonal slice is fetched; init_date is included because S2S
-    forecasts are keyed on a single issuance date.
+    forecasts are keyed on a single issuance date. reject_degenerate is NOT a
+    cache arg — it only governs whether a fresh (cache-miss) response is
+    validated before being memoized, so it must not fork the key.
     """
-    return _fetch_raw(product, variable, config, date_range, region)
+    return _fetch_raw(product, variable, config, date_range, region,
+                      reject_degenerate=reject_degenerate)
 
 SEASON_MONTHS = {
     "DJF": (12, 2), "JFM": (1, 3), "FMA": (2, 4), "MAM": (3, 5),
@@ -143,7 +156,7 @@ def fetch(product, variable, init=None, target=None, region=None,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
           reforecast=False, boundary="center", region_buffer=1.5,
           year_index=False, seasonal=None, grid_res=None, regrid_to=None,
-          months=None):
+          months=None, degenerate_attempts=1):
     """Fetch, normalize, and optionally save climate data.
 
     init names the forecast issuance. Seasonal products take a month
@@ -388,15 +401,38 @@ def fetch(product, variable, init=None, target=None, region=None,
                       max(-180.0, bbox[2] - b), min(180.0, bbox[3] + b)]
 
     _log(verbose, f"downloading via adapter={config['adapter']}")
-    if cache:
-        raw = _fetch_raw_cached(
-            product, variable, config, date_range, fetch_bbox,
-            init_months=tuple(config.get("init_months", [])),
-            init_date=cache_init_date,
-        )
-    else:
-        raw = get_adapter(config["adapter"]).fetch_data(
-            config, variable, date_range=date_range, region=fetch_bbox)
+    # degenerate_attempts>1 is the opt-in for the degenerate-response guard (a zero-filled /
+    # truncated response). A fresh fetch is validated inside _fetch_raw before it can be cached; a
+    # cache HIT is validated here too, so a legacy entry poisoned before this guard existed is
+    # caught rather than silently reused; on failure we retry with the cache bypassed to get past a
+    # poisoned entry / a transient truncation and re-hit the source. degenerate_attempts=1 (the
+    # default) skips all of this, preserving the original behaviour for callers that don't opt in.
+    want_reject = degenerate_attempts > 1
+    attempts = max(1, int(degenerate_attempts))
+    raw = None
+    for attempt in range(attempts):
+        use_cache = cache and attempt == 0
+        try:
+            if use_cache:
+                # only pass reject_degenerate when opting in, so the default call signature stays
+                # byte-identical (existing callers / mocks that pin the signature are untouched)
+                extra = {"reject_degenerate": True} if want_reject else {}
+                raw = _fetch_raw_cached(
+                    product, variable, config, date_range, fetch_bbox,
+                    init_months=tuple(config.get("init_months", [])),
+                    init_date=cache_init_date, **extra,
+                )
+                if want_reject:
+                    reject_if_degenerate(raw, variable, f"rosetta.fetch({product!r}) [cached]",
+                                         reject_all_nan=False)
+            else:
+                extra = {"reject_degenerate": True} if want_reject else {}
+                raw = _fetch_raw(product, variable, config, date_range, fetch_bbox, **extra)
+            break
+        except DegenerateResponseError as e:
+            if attempt == attempts - 1:
+                raise
+            _log(verbose, f"{e} — retrying without cache ({attempt + 2}/{attempts})")
     _log(verbose, "normalizing dataset")
     # normalize gets the original (unpadded) bbox: in cover mode it expands by
     # half a cell to cover it; in center mode it slices to it exactly.
@@ -408,16 +444,31 @@ def fetch(product, variable, init=None, target=None, region=None,
     if seasonal is not None:
         if seasonal != "mean":
             raise ValueError(f"seasonal must be 'mean' or None, got {seasonal!r}")
+        if target is None and months is None:
+            raise ValueError(
+                "seasonal='mean' needs a season to average over: pass either target= "
+                "(a 3-month season code) or months= (explicit calendar months)."
+            )
+        if target is not None and months is not None:
+            raise ValueError(
+                "seasonal='mean' takes target= or months=, not both — they specify the same "
+                "thing two ways. Pass one."
+            )
         for name, da in list(clean.data_vars.items()):
             if "time" in da.dims:
-                s, e = SEASON_MONTHS[target.upper()]
-                if e < s:
-                    raise NotImplementedError(
-                        f"seasonal='mean' does not yet support wraparound seasons ({target}); "
-                        "only within-year seasons are supported"
-                    )
-                months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
-                sub = da.sel(time=da.time.dt.month.isin(months))
+                if target is not None:
+                    s, e = SEASON_MONTHS[target.upper()]
+                    if e < s:
+                        raise NotImplementedError(
+                            f"seasonal='mean' does not yet support wraparound seasons ({target}); "
+                            "only within-year seasons are supported"
+                        )
+                    sel_months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
+                else:
+                    # no season given: average the explicitly-requested calendar months
+                    # (e.g. months=[6] for a single-month June predictor).
+                    sel_months = sorted({int(m) for m in months})
+                sub = da.sel(time=da.time.dt.month.isin(sel_months))
                 clean[name] = sub.groupby("time.year").mean("time")
     if grid_res is not None:
         lat_s, lat_n, lon_w, lon_e = region

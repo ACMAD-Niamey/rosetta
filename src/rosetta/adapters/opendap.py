@@ -2,7 +2,8 @@ import numpy as np
 import xarray as xr
 from .base import AdapterBase
 from ..normalize import decode_months_since, select_lon
-from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
+from ._robust import (_DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry,
+                      reject_if_degenerate)
 
 
 # IRI Data Library's Ingrid convention: the variable is a path segment and the
@@ -37,30 +38,13 @@ _DEFAULT_MAX_REQUEST_YEARS = 5
 
 
 def _reject_degenerate(ds, variable, label):
-    """Raise if a multi-step response is bitwise constant.
+    """Reject a bitwise-constant or all-NaN multi-step OPeNDAP response (a truncated DAP packet).
 
-    A gridded geophysical field spanning several timesteps is never a single
-    repeated value, and never has a land/ocean mask that vanished. A response
-    that looks like that is a truncated DAP packet, not data.
+    Thin wrapper over :func:`rosetta.adapters._robust.reject_if_degenerate` (the shared detector
+    used across all adapters and the fetch cache path); ``reject_all_nan=True`` keeps the stricter
+    obs-chunk policy — an observed field over its valid domain is never entirely missing.
     """
-    if variable not in ds:
-        return
-    values = ds[variable].values
-    if values.size < 2:
-        return
-    finite = np.isfinite(values)
-    if not finite.any():
-        raise RuntimeError(
-            f"OPeNDAP: {label} returned no finite values for {variable!r}."
-        )
-    unique = np.unique(values[finite])
-    if unique.size == 1:
-        raise RuntimeError(
-            f"OPeNDAP: {label} returned a constant {variable!r} field "
-            f"(every value is {unique[0]}). This is the signature of a truncated "
-            "DAP response, not real data. Lower 'max_request_years' for this "
-            "product."
-        )
+    reject_if_degenerate(ds, variable, label, reject_all_nan=True)
 
 
 def _load_obs_chunks(ds, variable, y0, y1, max_years, verbose, label):

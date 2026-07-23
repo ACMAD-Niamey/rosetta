@@ -45,7 +45,7 @@ def assemble(roster, variable, *, init, target, region=None, grid_res=None,
     return out
 
 
-def obs_predictor(product, variable, *, target, hindcast, forecast_year,
+def obs_predictor(product, variable, *, target=None, months=None, hindcast, forecast_year,
                   region=None, grid_res=None, regrid_to=None, seasonal="mean",
                   boundary="center", cache=True, verbose=True):
     """Use an OBSERVED gridded field as a seasonal predictor: `(hindcast, forecast)`.
@@ -57,16 +57,19 @@ def obs_predictor(product, variable, *, target, hindcast, forecast_year,
     `(year, member, lat, lon)` pair so an obs predictor drops into
     `deepscale.seasonal_mme`'s `predictor_tracks` exactly like a model.
 
-    Parameters mirror `assemble`/`fetch`: `target` is the season, `hindcast` the
-    `(start, end)` training window, `forecast_year` the year to predict from.
-    Observations carry no init/lead — the season is selected by `seasonal` (mean
-    over the target months), so both the training series and the single forecast
-    year come from the same observed product.
+    Give EITHER `target` (a 3-month season) OR `months` (explicit calendar months,
+    e.g. `[6]` for a single-month June predictor — ACMAD's Exp-1 uses the single IC
+    month). `hindcast` is the `(start, end)` training window, `forecast_year` the
+    year to predict from. Observations carry no init/lead; `seasonal="mean"` averages
+    the selected month(s), so the training series and the single forecast year come
+    from the same observed product.
 
     Returns `(hindcast, forecast)`; `forecast` is the `forecast_year` slice
     (`year=[forecast_year]`, `member=[0]`).
     """
-    common = dict(target=target, region=region, grid_res=grid_res,
+    if (target is None) == (months is None):
+        raise ValueError("obs_predictor needs exactly one of `target` or `months`")
+    common = dict(target=target, months=months, region=region, grid_res=grid_res,
                   regrid_to=regrid_to, seasonal=seasonal, cache=cache,
                   verbose=verbose, boundary=boundary)
     y0, y1 = hindcast

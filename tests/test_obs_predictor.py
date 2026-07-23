@@ -36,3 +36,29 @@ def test_obs_predictor_shapes_and_forecast_split(monkeypatch):
     assert list(hcst.year.values) == list(range(1991, 2021))
     assert list(fcst.year.values) == [2026]
     assert hcst.sizes["member"] == 1 and fcst.sizes["member"] == 1
+
+
+def test_obs_predictor_accepts_months_form(monkeypatch):
+    # ACMAD Exp-1: a single initialisation month as predictor, months=[6], no season code.
+    captured = {}
+
+    def _fake(product, variable, *, hindcast, **kw):
+        captured.update(kw)
+        return _fake_fetch(product, variable, hindcast=hindcast, **kw)
+
+    monkeypatch.setattr(assemble_mod, "fetch", _fake)
+    hcst, fcst = rosetta.obs_predictor(
+        "obs/ersst-v5", "sst", months=[6],
+        hindcast=(1991, 2020), forecast_year=2026, region=[-35, 35, 0, 360])
+    assert captured.get("months") == [6] and captured.get("target") is None
+    assert hcst.dims == ("year", "member", "lat", "lon")
+    assert list(fcst.year.values) == [2026]
+
+
+def test_obs_predictor_requires_exactly_one_of_target_or_months():
+    import pytest
+    with pytest.raises(ValueError, match="exactly one of"):
+        rosetta.obs_predictor("obs/ersst-v5", "sst", hindcast=(1991, 2020), forecast_year=2026)
+    with pytest.raises(ValueError, match="exactly one of"):
+        rosetta.obs_predictor("obs/ersst-v5", "sst", target="ASO", months=[6],
+                              hindcast=(1991, 2020), forecast_year=2026)
