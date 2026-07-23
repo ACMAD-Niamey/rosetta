@@ -18,6 +18,11 @@ Deprecated aliases (emit `DeprecationWarning`, resolve to base products): `nmme/
 
 The CCSR adapter also normalizes longitude from 0-360 to [-180, 180].
 
+Two practical caveats from operational use:
+
+- **Real-time vs hindcast availability differ per model and drift over time** — a model can have a full 1991-2020 hindcast but publish no current-month forecast (SPEAR in mid-2026), or a hindcast too short for a 30-year baseline (GEOSS2S ends 2017). Probe before committing a roster: `check_product(p, probe_remote=True)` or a cheap single-year fetch of the current init. CFSv2 sometimes returns a single (member-reduced) ensemble member — useless for spread-based calibration.
+- **CCSR precip has been observed as monthly totals (mm), not mm/day** — check `attrs["units"]` and see the units warning in `data-conventions.md` before mixing with rate-based products.
+
 ## C3S seasonal models (`c3s/*`) — Copernicus CDS credentials (`~/.cdsapirc`)
 
 All fetch precip/temp/sst, monthly or daily cadence via the `cds` adapter:
@@ -63,9 +68,9 @@ All precip-only, 0.05°, `fill_value: -9999`:
 
 | Product | Source | Notes |
 |---|---|---|
-| `obs/chirps-v3-daily-rhiza` | chirps_v3 | preferred over native v3 daily for routine use |
-| `obs/chirps-v2-dekadal-rhiza` | chirps_v2 (`agg_days: 10`) | 10-day rolling aggregate; used by the deepscale S2S testbed |
-| `obs/chirps-live-rhiza` | chirps.chirps_raw_live | 0.05°, near-real-time (~8-day lag), `recompute`/`cache_mode: write`; used by the deepscale S2S testbed |
+| `obs/chirps-v3-daily-rhiza` | chirps_v3 | preferred over native v3 daily for routine use. 0.25° (coarsened from native 0.05°); archive covers ~2000 to mid-2024 — no current-season data |
+| `obs/chirps-v2-dekadal-rhiza` | chirps_v2 (`agg_days: 10`) | 10-day **rolling** aggregate — NOT calendar dekads (native `obs/chirps-v2-dekad` is calendar); used by the deepscale S2S testbed |
+| `obs/chirps-live-rhiza` | chirps.chirps_raw_live | 0.05°, near-real-time (~8-day lag), `recompute`/`cache_mode: write`; used by the deepscale S2S testbed. **Known issue:** upstream sheerwater removed `chirps_raw_live` (AttributeError) — see troubleshooting |
 | `obs/imerg` | imerg_final | satellite precip |
 | `obs/ghcn` | ghcn_avg | station-derived temp |
 

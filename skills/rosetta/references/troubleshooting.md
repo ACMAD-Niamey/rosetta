@@ -42,6 +42,9 @@ The s3 adapter shells out to the **AWS CLI** (`aws s3 ls/cp`) — configure `aws
 | `DeprecationWarning` on fetch | Product is an alias or date-deprecated — see `catalog.info(p)` for `successor` |
 | 401 / interactive auth prompt / fsspec `Protocol not known` touching `gs://sheerwater-datalake/...` | Ambient nuthatch config shadowing — see below |
 | GRIB decode errors | MARS/S2S need `cfgrib` + `eccodeslib` (installed by default); rosetta uses `decode_timedelta=False` to avoid an xarray non-nanosecond-timedelta assertion |
+| `ERR: DAP DATADDS packet is apparently too short` printed to **stderr** (no exception) | An OPeNDAP server (seen with NOAA PSL/THREDDS) truncated a large request; netCDF4 then returns a **plausible zero-filled array** — right shape/dtype, wrong data — which can reach the cache and re-serve on retry. Chunk big remote requests (e.g. ≤10 years of a global monthly field per request) and sanity-check (non-zero variance, land mask present) before trusting; purge poisoned entries with `rosetta cache clear --product X` |
+| `AttributeError` on sheerwater's `chirps_raw_live` | Upstream sheerwater removed the near-real-time function; `obs/chirps-live-rhiza` fails until it is restored — for current-season CHIRPS use the native CHC products (subject to their rate limits) |
+| Full CrowdSec 403 on **every** CHC path including the site root | The IP ban is site-wide and time-limited (hours to days) — wait it out; don't retry, it can extend the ban |
 
 ## Cache issues
 
@@ -49,7 +52,13 @@ The s3 adapter shells out to the **AWS CLI** (`aws s3 ls/cp`) — configure `aws
 - Cache key: `(product, variable, date_range, region-bbox, init_months, init_date)` under namespace `rosetta`, versioned by `_CACHE_VERSION` (currently 5). A version bump invalidates all cached entries. Polygon geometries never enter the key.
 - `cache=False` bypasses nuthatch entirely (straight to adapter).
 - Inspect / clear: `rosetta cache list`, `rosetta cache clear [--product X] [--yes]` (wraps `python -m nuthatch list/delete --namespace rosetta`).
-- **Sheerwater shadowing gotcha:** when `sheerwater` is co-installed, nuthatch's upward config search can escape `site-packages/rosetta/` and adopt sheerwater's `nuthatch.toml`, which points the cache root at a private GCS bucket (`gs://sheerwater-datalake/...`) → 401s or fsspec crashes for users without those credentials. Rosetta defends twice: it ships a shadow `src/rosetta/nuthatch.toml` (`filesystem = "file://~/.nuthatch/caches"`) and pins the env vars at import. If you still see GCS errors, check for an ambient `~/.nuthatch.toml` or env vars pointing at GCS.
+- **Sheerwater shadowing gotcha:** when `sheerwater` is co-installed, nuthatch's upward config search can escape `site-packages/rosetta/` and adopt sheerwater's `nuthatch.toml`, which points the cache root at a private GCS bucket (`gs://sheerwater-datalake/...`) → 401s or fsspec crashes for users without those credentials. Rosetta defends twice: it ships a shadow `src/rosetta/nuthatch.toml` (`filesystem = "file://~/.nuthatch/caches"`) and pins the env vars at import. If you still see GCS errors, check for an ambient `~/.nuthatch.toml` or env vars pointing at GCS. If nuthatch tries the private bucket first and **prompts interactively** (fatal in scripts/CI), skip it explicitly so reads fall through to the public anonymous mirror:
+
+  ```toml
+  # ~/.nuthatch.toml
+  [tool.nuthatch]
+  skipped_filesystems = ["gs://sheerwater-datalake/caches"]
+  ```
 - Datasets are **eagerly loaded** (`.load()`) before caching on purpose: pickling a lazy dataset stores only a "reopen this temp file" recipe that breaks across sessions.
 
 ## Install notes

@@ -27,6 +27,8 @@
    | mm | mm/day | identity (already mm per 24 h) |
 
    `da.attrs["units"]` is set to `target_units`.
+
+   **Verify units in practice — conversion is attrs-driven and not bulletproof.** The `mm → mm/day` identity assumes "mm per 24 h" (true for deaccumulated S2S leads); a source serving *monthly totals* labeled `mm` passes through unconverted, and `mm/month ÷ 30` is an approximation. CCSR NMME precip has repeatedly been observed arriving as monthly totals (~100 mm where ERA5 says ~3 mm/day). Before mixing products, check `da.attrs["units"]` and sanity-check magnitudes against a known-rate product; convert totals exactly with days-per-month (`calendar.monthrange`). A cheap guard when looping over mixed rosters: treat the field as a rate only if `"day"`, `"/d"`, or `"d-1"` appears in the units string.
 9. **Fill-value masking** — catalog `fill_value` (e.g. -9999) -> NaN.
 10. **Latitude ascending** — `ds.sortby("lat")`. Canonical convention: lat always ascending.
 11. **Spatial selection** — polygon clip (`clip_to_geometry`, rioxarray `.rio.clip`, `all_touched = (boundary == "cover")`) when a geometry was given; otherwise bbox `.sel(lat=slice, lon=slice)` (cover mode expands by half a grid cell).
@@ -42,6 +44,13 @@
 ## Season strings
 
 `SEASON_MONTHS` (start_month, end_month): DJF (12,2), JFM (1,3), FMA (2,4), MAM (3,5), AMJ (4,6), MJJ (5,7), JJA (6,8), JAS (7,9), ASO (8,10), SON (9,11), OND (10,12), NDJ (11,1). Wraparound seasons (end < start) roll into the following year; `seasonal="mean"` does not support them.
+
+### Year labeling at multi-month leads (wraparound bookkeeping)
+
+At an operational lead (e.g. 2 months: MAM initialized in January), early-year targets put the init in the **previous calendar year** — JFM targeted from November, FMA from December. `year_index=True` labels years from `init_time`, so when aligning such forecasts with obs labeled by *target* year, add +1 to the forecast's year for those seasons (compute the init month mod-12 and offset when it wraps). Two further rules from downstream use:
+
+- **Rectangular multi-season cubes:** when stacking several seasons into one `(season, year, ...)` cube (e.g. for deepscale's `seasonal_coefficients`), *intersect* the years available across all seasons rather than union them — wraparound seasons otherwise NaN-pad the cube.
+- The `init_time → year` rename is what `year_index=True` does for you; for obs use `seasonal="mean"` (which yields a `year` dim directly). Prefer these over hand-rolled `.dt.year` renames.
 
 ## Downstream contract (deepscale)
 

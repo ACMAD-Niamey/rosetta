@@ -76,6 +76,21 @@ models = assemble(roster, "precip", init="2024-02", target="MAM",
 #    member dim guaranteed even for single-member sources
 ```
 
+`assemble()` **raises on the first per-model failure** — deliberate, so a roster never silently shrinks. But real-time availability varies (a model may have a hindcast and no live forecast this month), so for tolerant rosters fetch per model and degrade explicitly:
+
+```python
+models = {}
+for label, product, hind in [("CanSIPS", "nmme/cansipsic4", (1993, 2016)), ...]:
+    hc = fetch(product, "precip", init=init, target=target, region=region,
+               hindcast=hind, year_index=True)["precip"]
+    try:
+        fc = fetch(product, "precip", init=init, target=target, region=region,
+                   hindcast=(init_year, init_year), year_index=True)["precip"]
+    except Exception:
+        fc = None                       # no live forecast — keep the hindcast
+    models[label] = (hc, fc)
+```
+
 ## Regions
 
 Three forms (see [references/api.md](references/api.md) for details):
@@ -129,6 +144,8 @@ check_product("obs/era5", probe_remote=True) # also pings the live source
 - Deprecated products emit `DeprecationWarning` and alias to successors — check `catalog.info(p)["deprecated"]`.
 - S3 adapter shells out to the AWS **CLI**, not boto3 — `aws` must be configured.
 - If nuthatch tries to reach `gs://sheerwater-datalake/...` and 401s, ambient config is shadowing rosetta's — see troubleshooting.
+- **Verify units before mixing products**: unit conversion is attrs-driven; CCSR NMME precip has arrived as monthly totals (mm) rather than mm/day — check `attrs["units"]` and magnitudes (see data-conventions).
+- Real-time model availability drifts (hindcast present, live forecast absent) — probe with `check_product(p, probe_remote=True)` before committing a multi-model roster; `assemble()` raises on the first failing model by design.
 
 ## Runnable examples
 
