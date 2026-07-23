@@ -20,6 +20,72 @@ resolution-markers = [
 overrides = [{ name = "zarr", specifier = ">=3.1.0" }]
 
 [[package]]
+name = "accord-rosetta"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "cdsapi" },
+    { name = "cfgrib" },
+    { name = "eccodeslib" },
+    { name = "ecmwf-api-client" },
+    { name = "netcdf4" },
+    { name = "numpy" },
+    { name = "nuthatch" },
+    { name = "pyyaml" },
+    { name = "rioxarray" },
+    { name = "scipy" },
+    { name = "sheerwater" },
+    { name = "tqdm" },
+    { name = "xarray" },
+]
+
+[package.optional-dependencies]
+demo = [
+    { name = "cartopy" },
+    { name = "matplotlib" },
+    { name = "rasterio" },
+]
+dev = [
+    { name = "pytest" },
+]
+geo = [
+    { name = "geopandas" },
+    { name = "rasterio" },
+]
+icechunk = [
+    { name = "icechunk" },
+]
+s3 = [
+    { name = "boto3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", marker = "extra == 's3'" },
+    { name = "cartopy", marker = "extra == 'demo'" },
+    { name = "cdsapi", specifier = ">=0.7.7" },
+    { name = "cfgrib", specifier = ">=0.9.15.1" },
+    { name = "eccodeslib", specifier = ">=2.46.2.19" },
+    { name = "ecmwf-api-client", specifier = ">=1.6" },
+    { name = "geopandas", marker = "extra == 'geo'" },
+    { name = "icechunk", marker = "extra == 'icechunk'", specifier = ">=2" },
+    { name = "matplotlib", marker = "extra == 'demo'" },
+    { name = "netcdf4" },
+    { name = "numpy" },
+    { name = "nuthatch", specifier = ">=0.4.9" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pyyaml" },
+    { name = "rasterio", marker = "extra == 'demo'" },
+    { name = "rasterio", marker = "extra == 'geo'" },
+    { name = "rioxarray" },
+    { name = "scipy" },
+    { name = "sheerwater", specifier = ">=0.2.5" },
+    { name = "tqdm" },
+    { name = "xarray" },
+]
+provides-extras = ["icechunk", "s3", "dev", "demo", "geo"]
+
+[[package]]
 name = "affine"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4218,70 +4284,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/68/ba/9b70c0e33159244b2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/aa/4ba81b24acf2b05cb00fd7603f84e5088af72596839f85c23c6ff5d249d7/rioxarray-0.21.0-py3-none-any.whl", hash = "sha256:f8793822f09ab7de3a82ffe711beff4cdf313a860ff86df0942f3385374ac562", size = 64940, upload-time = "2026-01-26T17:15:45.648Z" },
 ]
-
-[[package]]
-name = "rosetta"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "cdsapi" },
-    { name = "cfgrib" },
-    { name = "eccodeslib" },
-    { name = "ecmwf-api-client" },
-    { name = "icechunk" },
-    { name = "netcdf4" },
-    { name = "numpy" },
-    { name = "nuthatch" },
-    { name = "pyyaml" },
-    { name = "rioxarray" },
-    { name = "scipy" },
-    { name = "sheerwater" },
-    { name = "tqdm" },
-    { name = "xarray" },
-]
-
-[package.optional-dependencies]
-demo = [
-    { name = "cartopy" },
-    { name = "matplotlib" },
-    { name = "rasterio" },
-]
-dev = [
-    { name = "pytest" },
-]
-geo = [
-    { name = "geopandas" },
-    { name = "rasterio" },
-]
-s3 = [
-    { name = "boto3" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", marker = "extra == 's3'" },
-    { name = "cartopy", marker = "extra == 'demo'" },
-    { name = "cdsapi", specifier = ">=0.7.7" },
-    { name = "cfgrib", specifier = ">=0.9.15.1" },
-    { name = "eccodeslib", specifier = ">=2.46.2.19" },
-    { name = "ecmwf-api-client", specifier = ">=1.6" },
-    { name = "geopandas", marker = "extra == 'geo'" },
-    { name = "icechunk", specifier = ">=2" },
-    { name = "matplotlib", marker = "extra == 'demo'" },
-    { name = "netcdf4" },
-    { name = "numpy" },
-    { name = "nuthatch", specifier = ">=0.4.9" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pyyaml" },
-    { name = "rasterio", marker = "extra == 'demo'" },
-    { name = "rasterio", marker = "extra == 'geo'" },
-    { name = "rioxarray" },
-    { name = "scipy" },
-    { name = "sheerwater", specifier = ">=0.2.5" },
-    { name = "tqdm" },
-    { name = "xarray" },
-]
-provides-extras = ["s3", "dev", "demo", "geo"]
 
 [[package]]
 name = "s3fs"

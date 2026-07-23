@@ -115,7 +115,10 @@ nmme/ccsm4:
       target_units: mm
     temp:
       native_name: t2m
-      units: K
+      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
+      # double K->C conversion in normalize() -> sub-absolute-zero values.
+      units: C
       target_units: C
     sst:
       native_name: sst
@@ -143,7 +146,10 @@ nmme/cesm1:
       target_units: mm
     temp:
       native_name: t2m
-      units: K
+      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
+      # double K->C conversion in normalize() -> sub-absolute-zero values.
+      units: C
       target_units: C
     sst:
       native_name: sst
@@ -170,7 +176,10 @@ nmme/geoss2s:
       target_units: mm
     temp:
       native_name: t2m
-      units: K
+      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
+      # double K->C conversion in normalize() -> sub-absolute-zero values.
+      units: C
       target_units: C
     sst:
       native_name: sst
@@ -276,7 +285,10 @@ c3s/eccc-cansipsv3:
     lon_res: 1.0
     forecast_members: 20
     hindcast_members: 20
-    hindcast_range: [1980, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast
+    hindcast_range: [1993, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast; CDS
+                                   # serves reforecasts from 1993 (verified 2026-07-21:
+                                   # init years <=1992 return HTTP 400 "invalid combination"),
+                                   # not 1980 as previously recorded.
     forecast_range: [2024, null]   # real-time, ongoing (verified)
 
 c3s/meteofrance:
@@ -677,7 +689,10 @@ c3s/eccc-daily:
     lon_res: 1.0
     forecast_members: 20
     hindcast_members: 20
-    hindcast_range: [1980, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast
+    hindcast_range: [1993, 2023]   # ECCC CanESM5.1 (C3S system 4) native reforecast; CDS
+                                   # serves reforecasts from 1993 (verified 2026-07-21:
+                                   # init years <=1992 return HTTP 400 "invalid combination"),
+                                   # not 1980 as previously recorded.
     forecast_range: [2024, null]   # real-time, ongoing (verified)
 
 c3s/ukmo-daily:
@@ -1370,7 +1385,10 @@ nmme/spear:
       target_units: "mm"
     temp:
       native_name: t2m
-      units: K
+      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
+      # double K->C conversion in normalize() -> sub-absolute-zero values.
+      units: C
       target_units: C
     sst:
       native_name: sst
@@ -1434,7 +1452,10 @@ nmme/cansipsic4:
       target_units: "mm"
     temp:
       native_name: t2m
-      units: K
+      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
+      # double K->C conversion in normalize() -> sub-absolute-zero values.
+      units: C
       target_units: C
     sst:
       native_name: sst

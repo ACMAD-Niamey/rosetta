@@ -181,7 +181,7 @@ def fetch(product, variable, init=None, target=None, region=None,
     shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
     the bounding box drives upstream slicing and the result is masked to the
     true polygon (cells outside it become NaN). Shapefile/geometry support
-    needs the `geo` extra: pip install 'rosetta[geo]'.
+    needs the `geo` extra: pip install 'accord-rosetta[geo]'.
 
     boundary selects which grid cells count as inside the region, for both bbox
     and shapefile/geometry inputs:
@@ -224,12 +224,15 @@ def fetch(product, variable, init=None, target=None, region=None,
 
     seasonal=None (default): no seasonal aggregation. seasonal="mean" subsets
     the `target` season's months on the `time` dim and averages them to one
-    value per calendar year (dim `time` -> `year`). No-op for data vars that
-    have no `time` dim (e.g. year_index=True results, already lead-averaged).
-    Requires `target`. Only within-year seasons are supported (e.g. MAM);
-    wraparound seasons that cross a calendar-year boundary (e.g. NDJ, DJF)
-    raise NotImplementedError, since groupby("time.year") would silently
-    split a single season instance across two different year groups.
+    value per year (dim `time` -> `year`). No-op for data vars that have no
+    `time` dim (e.g. year_index=True results, already lead-averaged). Requires
+    `target`. Within-year seasons (e.g. MAM) are labelled by their calendar
+    year. Wraparound seasons that cross the calendar-year boundary (NDJ, DJF)
+    are labelled by the year of their starting month (so DJF Dec YYYY + Jan/Feb
+    YYYY+1 -> year YYYY, matching how a wraparound forecast target is labelled
+    by its initialization year); the wrapped months are shifted back a year
+    before grouping, and incomplete seasons at the ends of the record (missing
+    one or more of the season's months) are dropped.
 
     grid_res=None (default): no regridding. grid_res=<float> interpolates
     onto a regular lat/lon grid at that resolution spanning `region`
@@ -458,18 +461,31 @@ def fetch(product, variable, init=None, target=None, region=None,
             if "time" in da.dims:
                 if target is not None:
                     s, e = SEASON_MONTHS[target.upper()]
-                    if e < s:
-                        raise NotImplementedError(
-                            f"seasonal='mean' does not yet support wraparound seasons ({target}); "
-                            "only within-year seasons are supported"
-                        )
                     sel_months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
+                    sub = da.sel(time=da.time.dt.month.isin(sel_months))
+                    if e < s:
+                        # Wraparound season (e.g. DJF, NDJ): the months that fall past
+                        # December (month < s) belong to the season that began in the
+                        # previous calendar year's month s, so shift their year back by one.
+                        # The season is labelled by the year of its starting month, matching
+                        # how the seasonal forecasts label a wraparound target by its
+                        # initialization year. Only complete seasons (all months present) are
+                        # kept, dropping partial seasons at the record's ends.
+                        yr = sub["time"].dt.year
+                        season_year = xr.where(sub["time"].dt.month < s, yr - 1, yr)
+                        sub = sub.assign_coords(season_year=("time", season_year.data))
+                        counts = sub["time"].groupby("season_year").count()
+                        means = sub.groupby("season_year").mean("time")
+                        means = means.where(counts == len(sel_months), drop=True)
+                        clean[name] = means.rename({"season_year": "year"})
+                    else:
+                        clean[name] = sub.groupby("time.year").mean("time")
                 else:
                     # no season given: average the explicitly-requested calendar months
                     # (e.g. months=[6] for a single-month June predictor).
                     sel_months = sorted({int(m) for m in months})
-                sub = da.sel(time=da.time.dt.month.isin(sel_months))
-                clean[name] = sub.groupby("time.year").mean("time")
+                    sub = da.sel(time=da.time.dt.month.isin(sel_months))
+                    clean[name] = sub.groupby("time.year").mean("time")
     if grid_res is not None:
         lat_s, lat_n, lon_w, lon_e = region
         lats = np.arange(lat_s, lat_n + grid_res / 2.0, grid_res)
