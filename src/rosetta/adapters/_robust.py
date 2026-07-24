@@ -97,3 +97,56 @@ def _with_retry(fn, max_retries, backoff, label, verbose=True, on_failure=None,
                       f"retrying in {wait:.2f}s")
             time.sleep(wait)
     raise last_err  # unreachable, but keeps type-checkers honest
+
+
+# ---------------------------------------------------------------------------
+# Degenerate-response detection
+# ---------------------------------------------------------------------------
+# A large OPeNDAP/DAP request can fail mid-transfer and the netCDF/DAP client
+# silently substitutes a constant (typically all-zero) array instead of
+# raising. That corruption then gets memoized by the fetch cache and poisons
+# every downstream computation (a zero-variance predictor makes CCA singular,
+# NaN-ing out every skill score). This detector lets the fetch path reject such
+# a response *before* it is cached, for any adapter — generalizing what the
+# OPeNDAP adapter previously did only for its own obs-chunk path.
+import numpy as _np
+
+
+class DegenerateResponseError(RuntimeError):
+    """A fetched field is bitwise-constant (or all-NaN): a truncated/zero-filled response, not data."""
+
+
+def reject_if_degenerate(ds, variable, label, *, reject_all_nan=True):
+    """Raise :class:`DegenerateResponseError` if a multi-value field is degenerate.
+
+    A multi-cell, multi-timestep geophysical field is never a single repeated value, so a
+    bitwise-constant response (the common all-zero case included) is a truncated DAP packet or a
+    zero-filled server error, not real data.
+
+    ``reject_all_nan`` controls the all-NaN case: keep it True where a variable is expected present
+    over its domain (the OPeNDAP obs path); set it False on the general fetch path, where an
+    all-NaN result can be a legitimately land-masked region (e.g. SST over a land-only box).
+    """
+    if variable not in getattr(ds, "data_vars", {}) and variable not in getattr(ds, "coords", {}):
+        # tolerate callers passing the sole data var implicitly
+        try:
+            values = ds[variable].values
+        except Exception:
+            return
+    else:
+        values = ds[variable].values
+    if values.size < 2:
+        return
+    finite = _np.isfinite(values)
+    if not finite.any():
+        if reject_all_nan:
+            raise DegenerateResponseError(
+                f"{label}: {variable!r} returned no finite values — a truncated or empty response."
+            )
+        return
+    if _np.unique(values[finite]).size == 1:
+        raise DegenerateResponseError(
+            f"{label}: constant {variable!r} field (every value is {values[finite].flat[0]}). "
+            "This is the signature of a truncated DAP response or a zero-filled server error, not "
+            "real data."
+        )

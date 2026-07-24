@@ -27,6 +27,7 @@ import xarray as xr
 
 from .base import AdapterBase
 from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
+from ..normalize import select_lon
 
 _TIME_SINCE = re.compile(
     r"(hours?|days?|minutes?|seconds?|months?)\s+since\s+(\d{4})-(\d{1,2})-(\d{1,2})",
@@ -173,7 +174,13 @@ class CCSRAdapter(AdapterBase):
             lat_s, lat_n, lon_w, lon_e = region
             y = ds["Y"].values
             lat_slice = slice(lat_s, lat_n) if y[0] <= y[-1] else slice(lat_n, lat_s)
-            ds = ds.sel(Y=lat_slice, X=slice(lon_w, lon_e))
+            ds = ds.sel(Y=lat_slice)
+            # Longitude must go through select_lon, not a bare slice: X has just been
+            # normalized to -180..180, so a request stated in 0..360 would silently
+            # under-select (e.g. [0,360] -> only 0..179, half the globe; [120,290] ->
+            # 120..179, dropping the eastern tropical Pacific). select_lon translates
+            # the bounds into the data's convention and handles seam-crossing boxes.
+            ds = select_lon(ds, lon_w, lon_e, lon_name="X")
 
         return ds
 

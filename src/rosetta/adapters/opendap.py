@@ -1,9 +1,68 @@
 import numpy as np
 import xarray as xr
 from .base import AdapterBase
-from ..normalize import decode_months_since
-from ._robust import _DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry
+from ..normalize import decode_months_since, select_lon
+from ._robust import (_DEFAULT_MAX_RETRIES, _DEFAULT_RETRY_BACKOFF, _with_retry,
+                      reject_if_degenerate)
 
+
+# IRI Data Library's Ingrid convention: the variable is a path segment and the
+# dataset is served from a `/dods` suffix. Most of the catalog is IRIDL, so this
+# stays the default, but a catalog entry may override it — a THREDDS server
+# (e.g. NOAA PSL) serves a whole NetCDF at one URL with no variable segment.
+_DEFAULT_URL_TEMPLATE = "{base}/.{native_name}/dods"
+
+
+def _build_url(product_config, native_name, base):
+    template = product_config.get("url_template", _DEFAULT_URL_TEMPLATE)
+    return template.format(base=base, native_name=native_name)
+
+
+def _sort_ascending(ds, *coords):
+    """Sort the named 1-D coords ascending, leaving already-ascending ones alone."""
+    for coord in coords:
+        if coord not in ds.coords or ds[coord].ndim != 1 or ds.sizes[coord] < 2:
+            continue
+        values = ds[coord].values
+        if values[0] > values[-1]:
+            ds = ds.sortby(coord)
+    return ds
+
+
+# A DAP2 response larger than the server's cap comes back truncated. netCDF4
+# prints "DAP DATADDS packet is apparently too short" to stderr and hands us a
+# zero-filled array WITHOUT raising — so a 30-year SST request silently becomes
+# 30 years of 0 degC, land mask and all. Requesting in chunks keeps each
+# response under any plausible cap; `_reject_degenerate` catches the rest.
+_DEFAULT_MAX_REQUEST_YEARS = 5
+
+
+def _reject_degenerate(ds, variable, label):
+    """Reject a bitwise-constant or all-NaN multi-step OPeNDAP response (a truncated DAP packet).
+
+    Thin wrapper over :func:`rosetta.adapters._robust.reject_if_degenerate` (the shared detector
+    used across all adapters and the fetch cache path); ``reject_all_nan=True`` keeps the stricter
+    obs-chunk policy — an observed field over its valid domain is never entirely missing.
+    """
+    reject_if_degenerate(ds, variable, label, reject_all_nan=True)
+
+
+def _load_obs_chunks(ds, variable, y0, y1, max_years, verbose, label):
+    """Slice ``[y0, y1]`` in year blocks, loading and validating each in turn."""
+    chunks = []
+    for start in range(y0, y1 + 1, max_years):
+        end = min(start + max_years - 1, y1)
+        piece = ds.sel(time=slice(f"{start}-01-01", f"{end}-12-31"))
+        if piece.sizes.get("time", 0) == 0:
+            continue
+        if verbose:
+            print(f"[rosetta:opendap] loading {start}-{end}")
+        piece = piece.load()
+        _reject_degenerate(piece, variable, f"{label} ({start}-{end})")
+        chunks.append(piece)
+    if not chunks:
+        raise RuntimeError(f"OPeNDAP: {label} has no data in {y0}-{y1}")
+    return xr.concat(chunks, dim="time") if len(chunks) > 1 else chunks[0]
 
 
 class OPeNDAPAdapter(AdapterBase):
@@ -93,11 +152,16 @@ class OPeNDAPAdapter(AdapterBase):
         # forecast at sibling .HINDCAST/.FORECAST paths.
         if product_config.get("split_streams"):
             base = base.format(stream=stream.upper())
-        url = base + f"/.{native_name}/dods"
+        url = _build_url(product_config, native_name, base)
         if verbose:
             print(f"[rosetta:opendap] opening remote dataset: {url}")
+        # NMME's "months since" time encoding is not CF-decodable by xarray, so
+        # opening raw is the default and `decode_months_since` handles it below.
+        # An observational source with an ordinary "days since" axis opts in, so
+        # that its date_range can be sliced with real timestamps.
+        decode_times = bool(product_config.get("decode_times", False))
         ds = _with_retry(
-            lambda: xr.open_dataset(url, engine="netcdf4", decode_times=False),
+            lambda: xr.open_dataset(url, engine="netcdf4", decode_times=decode_times),
             max_retries, retry_backoff,
             label=f"OPeNDAP open {url}", verbose=verbose,
         )
@@ -116,19 +180,34 @@ class OPeNDAPAdapter(AdapterBase):
                 if verbose:
                     n = int(mask.sum())
                     print(f"[rosetta:opendap] filtered S to {n} init times")
-        elif date_range:
+        # An observational time axis is chunk-loaded after the region slice, so
+        # each DAP request carries only the cells the caller asked for.
+        obs_years = None
+        if "S" not in ds.coords and date_range:
             y0, y1 = date_range
             if "year" in ds.dims or "year" in ds.coords:
                 ds = ds.sel(year=slice(y0, y1))
             elif "time" in ds.coords:
-                ds = ds.sel(time=slice(f"{y0}-01-01", f"{y1}-12-31"))
+                obs_years = (y0, y1)
         if region:
             lat_s, lat_n, lon_w, lon_e = region
             lat_name = "Y" if "Y" in ds.dims else "lat"
             lon_name = "X" if "X" in ds.dims else "lon"
-            ds = ds.sel(
-                {lat_name: slice(lat_s, lat_n), lon_name: slice(lon_w, lon_e)}
-            )
+            # A descending axis (NOAA PSL files lat 88N -> 88S) makes an
+            # ascending `slice` select nothing at all — silently, and with no
+            # error. Sort first so the slice means what it says.
+            ds = _sort_ascending(ds, lat_name, lon_name)
+            # Longitude selection is convention-aware (−180..180 vs 0..360) and
+            # wrap-safe; a naive slice(lon_w, lon_e) silently under-selects when the
+            # request and the source disagree on convention. See normalize.select_lon.
+            ds = ds.sel({lat_name: slice(lat_s, lat_n)})
+            ds = select_lon(ds, lon_w, lon_e, lon_name=lon_name)
+
+        if obs_years is not None:
+            max_years = int(product_config.get(
+                "max_request_years", _DEFAULT_MAX_REQUEST_YEARS))
+            ds = _load_obs_chunks(
+                ds, native_name, obs_years[0], obs_years[1], max_years, verbose, url)
 
         # Select and average only the target-season lead months when specified.
         # NMME PENTAD_SAMPLES/.MONTHLY uses L = (lead_month - 0.5) half-integer

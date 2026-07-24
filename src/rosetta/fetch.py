@@ -5,7 +5,8 @@ from nuthatch import cache
 
 from . import catalog
 from .adapters import get_adapter
-from .normalize import normalize
+from .adapters._robust import reject_if_degenerate, DegenerateResponseError
+from .normalize import normalize, sanitize_for_netcdf
 from .region import resolve_region
 
 from .storage import save
@@ -14,10 +15,19 @@ _CACHE_VERSION = 5  # bump when adapter logic or normalization changes
 
 
 def _fetch_raw(product: str, variable: str, config: dict,
-               date_range, region) -> xr.Dataset:
-    """Download raw (un-normalized) data from the adapter. Cached by _fetch_raw_cached."""
+               date_range, region, reject_degenerate: bool = False) -> xr.Dataset:
+    """Download raw (un-normalized) data from the adapter. Cached by _fetch_raw_cached.
+
+    When ``reject_degenerate`` is set (opt-in, via ``fetch(degenerate_attempts>1)``), a
+    bitwise-constant / zero-filled response is rejected here — before it can be memoized — so a
+    truncated DAP packet never poisons the cache, for any adapter. Off by default so mechanics
+    that legitimately use constant fields (and callers who don't opt in) are unaffected. all-NaN
+    is tolerated (a land-masked region can legitimately be all-NaN)."""
     adapter = get_adapter(config["adapter"])
-    return adapter.fetch_data(config, variable, date_range=date_range, region=region)
+    ds = adapter.fetch_data(config, variable, date_range=date_range, region=region)
+    if reject_degenerate:
+        reject_if_degenerate(ds, variable, f"rosetta.fetch({product!r})", reject_all_nan=False)
+    return ds
 
 
 @cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic",
@@ -25,15 +35,18 @@ def _fetch_raw(product: str, variable: str, config: dict,
                    "init_date"])
 def _fetch_raw_cached(product: str, variable: str, config: dict,
                       date_range, region, init_months=None,
-                      init_date=None) -> xr.Dataset:
+                      init_date=None, reject_degenerate=False) -> xr.Dataset:
     """Nuthatch-cached wrapper around _fetch_raw.
 
     Cache key uses only the stable scalar arguments, not the full config dict,
     to avoid dict-hashing issues. init_months is included because it determines
     which seasonal slice is fetched; init_date is included because S2S
-    forecasts are keyed on a single issuance date.
+    forecasts are keyed on a single issuance date. reject_degenerate is NOT a
+    cache arg — it only governs whether a fresh (cache-miss) response is
+    validated before being memoized, so it must not fork the key.
     """
-    return _fetch_raw(product, variable, config, date_range, region)
+    return _fetch_raw(product, variable, config, date_range, region,
+                      reject_degenerate=reject_degenerate)
 
 SEASON_MONTHS = {
     "DJF": (12, 2), "JFM": (1, 3), "FMA": (2, 4), "MAM": (3, 5),
@@ -86,13 +99,83 @@ def parse_init(init):
     return init
 
 
+def _is_init_sequence(init):
+    """True when ``init`` names several issuances rather than one.
+
+    Anything iterable that is not a string or a date: a list, a tuple, a numpy
+    array, a pandas DatetimeIndex.
+    """
+    from datetime import date, datetime
+
+    if isinstance(init, (str, bytes, datetime, date)):
+        return False
+    return hasattr(init, "__iter__")
+
+
+def _daily_issuance_key(init):
+    """The 'YYYY-MM-DD' form of a single issuance, or None if it is month-keyed.
+
+    Seasonal products are issued for a month; sub-seasonal and short-range ones
+    for a specific day. Only the latter can be enumerated as issuance dates.
+    """
+    if isinstance(init, str):
+        return init if len(init) == 10 else None
+    if hasattr(init, "strftime"):
+        return init.strftime("%Y-%m-%d")
+    return None
+
+
+def _match_lon_convention(obj, target_lons):
+    """Roll `obj`'s longitude into the target grid's convention before interpolation.
+
+    Interpolating a 0..360 source onto a target grid that includes negative
+    longitudes (e.g. an Africa grid spanning -25..55) silently NaNs the western
+    band, because the source has no coordinates at negative longitudes. Shift the
+    source into the target's convention (0..360 <-> -180..180) and re-sort so the
+    interpolation covers the whole target.
+    """
+    if "lon" not in getattr(obj, "coords", {}):
+        return obj
+    lon = np.asarray(obj["lon"].values, dtype=float)
+    if lon.size == 0:
+        return obj
+    t_min, t_max = float(np.min(target_lons)), float(np.max(target_lons))
+    s_min, s_max = float(np.min(lon)), float(np.max(lon))
+    if t_min < 0.0 and s_max > 180.0:          # target -180..180, source 0..360
+        obj = obj.assign_coords(lon=(((obj["lon"] + 180.0) % 360.0) - 180.0))
+        return obj.sortby("lon")
+    if t_max > 180.0 and s_min < 0.0:          # target 0..360, source -180..180
+        obj = obj.assign_coords(lon=(obj["lon"] % 360.0))
+        return obj.sortby("lon")
+    return obj
+
+
 def fetch(product, variable, init=None, target=None, region=None,
           hindcast=None, destination=None, format="netcdf", verbose=True,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
           reforecast=False, boundary="center", region_buffer=1.5,
-          year_index=False, seasonal=None, grid_res=None, regrid_to=None):
+          year_index=False, seasonal=None, grid_res=None, regrid_to=None,
+          months=None, degenerate_attempts=1):
     """Fetch, normalize, and optionally save climate data.
+
+    init names the forecast issuance. Seasonal products take a month
+    ("2026-07"); sub-seasonal and short-range ones take a day ("2026-07-05").
+    Issuance-keyed products (whose catalog entry has an `issuance` block) also
+    accept a *sequence* of dates, which is how you fetch the same calendar
+    issuance of many years for a hindcast-skill analysis:
+
+        rosetta.fetch("chc/chirps-gefs-daily", "precip",
+                      init=[f"{y}-06-30" for y in range(2001, 2020)],
+                      region="ethiopia.shp")
+
+    The result is stacked on init_time, with lead_time and valid_time coords.
+
+    months restricts an observational fetch to those calendar months, e.g.
+    months=[6, 7, 8, 9] for a JJAS analysis. For products stored one file per
+    (year, month) this prunes the *download*, not just the result: a four-month
+    season over 45 years is 180 files rather than 540. Against a rate-limited
+    server that is the difference between a pull and a ban.
 
     region accepts a bbox [lat_s, lat_n, lon_w, lon_e], a path to a .shp
     shapefile, or a shapely / geopandas geometry. For shapefiles and geometries
@@ -183,6 +266,59 @@ def fetch(product, variable, init=None, target=None, region=None,
     # has decommissioned legacy WEB-API access to the S2S dataset.
 
     date_range = hindcast
+    cache_init_date = None
+
+    if months is not None:
+        if init is not None:
+            raise ValueError(
+                "months prunes an observational fetch by calendar month; it has "
+                "no meaning alongside init, which already names the issuance."
+            )
+        wanted = sorted({int(m) for m in months})
+        if not wanted or not all(1 <= m <= 12 for m in wanted):
+            raise ValueError(f"months must be calendar months in 1..12, got {months!r}")
+        # `init_months` already means "which months of the year are in this
+        # request" (the OPeNDAP adapter filters its init axis with it) and is
+        # already a cache argument. Reusing it prunes the HTTP file enumeration
+        # and keys the cache correctly without adding a cache arg, which would
+        # invalidate every fetch already on disk.
+        config["init_months"] = wanted
+
+    if init is not None and _is_init_sequence(init):
+        # Several issuances at once: the hindcast-skill case, where you want the
+        # same calendar issuance of every year. Only products that declare an
+        # `issuance` block know how to enumerate more than one.
+        inits = list(init)
+        if not inits:
+            raise ValueError("init was an empty sequence")
+        if target is not None:
+            raise ValueError(
+                "target selects lead months relative to a single init; it cannot "
+                "be combined with a sequence of issuance dates. Fetch the leads "
+                "and select the target window afterwards."
+            )
+        if config.get("issuance") is None:
+            raise ValueError(
+                f"product {product!r} accepts a single init, not a sequence of "
+                f"{len(inits)}. Only issuance-keyed products (whose catalog entry "
+                "has an 'issuance' block) can be fetched across many issuances."
+            )
+        keys = [_daily_issuance_key(i) for i in inits]
+        if any(key is None for key in keys):
+            raise ValueError(
+                "issuance dates must be full 'YYYY-MM-DD' dates or datetimes; "
+                f"got {inits!r}"
+            )
+        init_dts = [parse_init(k) for k in keys]
+        config["_init_dates"] = sorted(set(keys))
+        config["init_months"] = sorted({d.month for d in init_dts})
+        if date_range is None:
+            years = [d.year for d in init_dts]
+            date_range = (min(years), max(years))
+        # Reuse the existing `init_date` cache slot rather than adding a new one,
+        # so every already-cached single-issuance fetch stays valid.
+        cache_init_date = tuple(config["_init_dates"])
+        init = None  # the single-init branch below does not apply
 
     if init:
         init_dt = parse_init(init)
@@ -202,6 +338,16 @@ def fetch(product, variable, init=None, target=None, region=None,
         # The seasonal datasets ignore _init_date and use init_months instead.
         if isinstance(init, str) and len(init) == 10:
             config["_init_date"] = init
+            cache_init_date = init
+        if config.get("issuance") is not None:
+            key = _daily_issuance_key(init)
+            if key is None:
+                raise ValueError(
+                    f"product {product!r} is issuance-keyed and needs a full "
+                    f"'YYYY-MM-DD' init date, got {init!r}"
+                )
+            config["_init_dates"] = [key]
+            cache_init_date = key
 
         if target:
             target_range = parse_target(target, year=init_dt.year)
@@ -258,15 +404,38 @@ def fetch(product, variable, init=None, target=None, region=None,
                       max(-180.0, bbox[2] - b), min(180.0, bbox[3] + b)]
 
     _log(verbose, f"downloading via adapter={config['adapter']}")
-    if cache:
-        raw = _fetch_raw_cached(
-            product, variable, config, date_range, fetch_bbox,
-            init_months=tuple(config.get("init_months", [])),
-            init_date=config.get("_init_date"),
-        )
-    else:
-        raw = get_adapter(config["adapter"]).fetch_data(
-            config, variable, date_range=date_range, region=fetch_bbox)
+    # degenerate_attempts>1 is the opt-in for the degenerate-response guard (a zero-filled /
+    # truncated response). A fresh fetch is validated inside _fetch_raw before it can be cached; a
+    # cache HIT is validated here too, so a legacy entry poisoned before this guard existed is
+    # caught rather than silently reused; on failure we retry with the cache bypassed to get past a
+    # poisoned entry / a transient truncation and re-hit the source. degenerate_attempts=1 (the
+    # default) skips all of this, preserving the original behaviour for callers that don't opt in.
+    want_reject = degenerate_attempts > 1
+    attempts = max(1, int(degenerate_attempts))
+    raw = None
+    for attempt in range(attempts):
+        use_cache = cache and attempt == 0
+        try:
+            if use_cache:
+                # only pass reject_degenerate when opting in, so the default call signature stays
+                # byte-identical (existing callers / mocks that pin the signature are untouched)
+                extra = {"reject_degenerate": True} if want_reject else {}
+                raw = _fetch_raw_cached(
+                    product, variable, config, date_range, fetch_bbox,
+                    init_months=tuple(config.get("init_months", [])),
+                    init_date=cache_init_date, **extra,
+                )
+                if want_reject:
+                    reject_if_degenerate(raw, variable, f"rosetta.fetch({product!r}) [cached]",
+                                         reject_all_nan=False)
+            else:
+                extra = {"reject_degenerate": True} if want_reject else {}
+                raw = _fetch_raw(product, variable, config, date_range, fetch_bbox, **extra)
+            break
+        except DegenerateResponseError as e:
+            if attempt == attempts - 1:
+                raise
+            _log(verbose, f"{e} — retrying without cache ({attempt + 2}/{attempts})")
     _log(verbose, "normalizing dataset")
     # normalize gets the original (unpadded) bbox: in cover mode it expands by
     # half a cell to cover it; in center mode it slices to it exactly.
@@ -278,34 +447,53 @@ def fetch(product, variable, init=None, target=None, region=None,
     if seasonal is not None:
         if seasonal != "mean":
             raise ValueError(f"seasonal must be 'mean' or None, got {seasonal!r}")
+        if target is None and months is None:
+            raise ValueError(
+                "seasonal='mean' needs a season to average over: pass either target= "
+                "(a 3-month season code) or months= (explicit calendar months)."
+            )
+        if target is not None and months is not None:
+            raise ValueError(
+                "seasonal='mean' takes target= or months=, not both — they specify the same "
+                "thing two ways. Pass one."
+            )
         for name, da in list(clean.data_vars.items()):
             if "time" in da.dims:
-                s, e = SEASON_MONTHS[target.upper()]
-                months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
-                sub = da.sel(time=da.time.dt.month.isin(months))
-                if e < s:
-                    # Wraparound season (e.g. DJF, NDJ): the months that fall past
-                    # December (month < s) belong to the season that began in the
-                    # previous calendar year's month s, so shift their year back by one.
-                    # The season is labelled by the year of its starting month, matching
-                    # how the seasonal forecasts label a wraparound target by its
-                    # initialization year. Only complete seasons (all len(months) months
-                    # present) are kept, dropping partial seasons at the record's ends.
-                    yr = sub["time"].dt.year
-                    season_year = xr.where(sub["time"].dt.month < s, yr - 1, yr)
-                    sub = sub.assign_coords(season_year=("time", season_year.data))
-                    counts = sub["time"].groupby("season_year").count()
-                    means = sub.groupby("season_year").mean("time")
-                    means = means.where(counts == len(months), drop=True)
-                    clean[name] = means.rename({"season_year": "year"})
+                if target is not None:
+                    s, e = SEASON_MONTHS[target.upper()]
+                    sel_months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
+                    sub = da.sel(time=da.time.dt.month.isin(sel_months))
+                    if e < s:
+                        # Wraparound season (e.g. DJF, NDJ): the months that fall past
+                        # December (month < s) belong to the season that began in the
+                        # previous calendar year's month s, so shift their year back by one.
+                        # The season is labelled by the year of its starting month, matching
+                        # how the seasonal forecasts label a wraparound target by its
+                        # initialization year. Only complete seasons (all months present) are
+                        # kept, dropping partial seasons at the record's ends.
+                        yr = sub["time"].dt.year
+                        season_year = xr.where(sub["time"].dt.month < s, yr - 1, yr)
+                        sub = sub.assign_coords(season_year=("time", season_year.data))
+                        counts = sub["time"].groupby("season_year").count()
+                        means = sub.groupby("season_year").mean("time")
+                        means = means.where(counts == len(sel_months), drop=True)
+                        clean[name] = means.rename({"season_year": "year"})
+                    else:
+                        clean[name] = sub.groupby("time.year").mean("time")
                 else:
+                    # no season given: average the explicitly-requested calendar months
+                    # (e.g. months=[6] for a single-month June predictor).
+                    sel_months = sorted({int(m) for m in months})
+                    sub = da.sel(time=da.time.dt.month.isin(sel_months))
                     clean[name] = sub.groupby("time.year").mean("time")
     if grid_res is not None:
         lat_s, lat_n, lon_w, lon_e = region
         lats = np.arange(lat_s, lat_n + grid_res / 2.0, grid_res)
         lons = np.arange(lon_w, lon_e + grid_res / 2.0, grid_res)
+        clean = _match_lon_convention(clean, lons)
         clean = clean.interp(lat=lats, lon=lons)
     if regrid_to is not None:
+        clean = _match_lon_convention(clean, regrid_to.lon.values)
         clean = clean.interp(lat=regrid_to.lat.values, lon=regrid_to.lon.values)
 
     # A region was requested but the source isn't spatially griddable (e.g.
@@ -319,6 +507,11 @@ def fetch(product, variable, init=None, target=None, region=None,
             f"sources (e.g. station/tabular observations) don't support spatial "
             f"region selection — drop `region`, or use a gridded product."
         )
+
+    # Rebuild so the result round-trips through to_netcdf: OPeNDAP/CF sources carry
+    # bounds vars + stale encoding that otherwise raise "NetCDF: String match to name
+    # in use" on write (in the returned object as well as the save() path below).
+    clean = sanitize_for_netcdf(clean)
 
     if destination:
         _log(verbose, f"saving output -> {destination}")

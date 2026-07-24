@@ -38,15 +38,18 @@ _os.environ.setdefault("NUTHATCH_LOCAL_FILESYSTEM", _cache_uri)
 
 from . import catalog
 from .fetch import fetch, parse_target, parse_init
-from .assemble import assemble
+from .assemble import assemble, obs_predictor
+from .zonal import zonal
 from .health import check_product, check_all_products
 
 __all__ = [
     "catalog",
     "fetch",
+    "zonal",
     "parse_target",
     "parse_init",
     "assemble",
+    "obs_predictor",
     "check_product",
     "check_all_products",
 ]

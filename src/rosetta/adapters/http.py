@@ -4,9 +4,12 @@ import tempfile
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+import numpy as np
 import pandas as pd
 import xarray as xr
 from .base import AdapterBase
+from ._issuance import enumerate_files, issuance_config, lead_timedelta
 from ._robust import (
     _DEFAULT_MAX_RETRIES,
     _DEFAULT_RETRY_BACKOFF,
@@ -16,6 +19,54 @@ from ._robust import (
 
 
 _MAX_WORKERS = 8
+
+# Start day of each sub-monthly slice, so a filename's dekad/pentad index maps
+# to a real timestamp. Dekads: day 1/11/21. Pentads: day 1/6/11/16/21/26.
+_DEKAD_DAYS = (1, 11, 21)
+_PENTAD_DAYS = (1, 6, 11, 16, 21, 26)
+
+
+def _enumerate_timeseries(file_pattern, date_range, product_config):
+    """Return ``[(filename, timestamp)]`` for a time-series product.
+
+    ``timestamp`` is an explicit ``pd.Timestamp`` for sub-monthly cadences —
+    where the filename's dekad/pentad index (``{dekad}``/``{pentad}``) cannot be
+    unambiguously read back from the name — and ``None`` for monthly/yearly
+    files, whose timestamp the opener infers from the filename as before.
+
+    Month pruning via ``init_months`` applies to every sub-monthly cadence, so a
+    JJAS analysis fetches four months of dekads, not twelve.
+    """
+    import pandas as pd
+
+    if not date_range:
+        # No range: one recent file, accounting for observational lag.
+        recent = datetime.now().replace(day=1) - timedelta(days=60)
+        if "{dekad}" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month, dekad=1),
+                     pd.Timestamp(recent.year, recent.month, 1))]
+        if "{pentad}" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month, pentad=1),
+                     pd.Timestamp(recent.year, recent.month, 1))]
+        if "{month" in file_pattern:
+            return [(file_pattern.format(year=recent.year, month=recent.month), None)]
+        return [(file_pattern.format(year=recent.year), None)]
+
+    y0, y1 = date_range
+    months = product_config.get("init_months") or range(1, 13)
+
+    if "{dekad}" in file_pattern:
+        return [(file_pattern.format(year=y, month=m, dekad=d),
+                 pd.Timestamp(y, m, _DEKAD_DAYS[d - 1]))
+                for y in range(y0, y1 + 1) for m in months for d in (1, 2, 3)]
+    if "{pentad}" in file_pattern:
+        return [(file_pattern.format(year=y, month=m, pentad=p),
+                 pd.Timestamp(y, m, _PENTAD_DAYS[p - 1]))
+                for y in range(y0, y1 + 1) for m in months for p in range(1, 7)]
+    if "{month" in file_pattern:
+        return [(file_pattern.format(year=y, month=m), None)
+                for y in range(y0, y1 + 1) for m in months]
+    return [(file_pattern.format(year=y), None) for y in range(y0, y1 + 1)]
 
 
 def _resolve_max_workers(product_config, n_urls):
@@ -59,8 +110,13 @@ def _subset_region(ds, region):
     return ds.load()
 
 
-def _open_cog_subset(url, region, variable=None, fill_value=None):
+def _open_raster(url, region, variable=None, fill_value=None):
     """Open a COG via HTTP range reads, subsetting to region without downloading the whole file.
+
+    Returns a 2-D ``(latitude, longitude)`` dataset carrying no time coordinate:
+    the caller decides what time the raster represents. `_open_cog_subset`
+    infers it from the filename (the observational convention); the issuance
+    path stamps init/lead explicitly.
 
     CHIRPS and similar climate COGs often store a sentinel fill (e.g. -9999) without
     declaring it in the TIFF nodata tag — rasterio then passes it through as data.
@@ -97,18 +153,30 @@ def _open_cog_subset(url, region, variable=None, fill_value=None):
     # Drop band dim if it's size 1
     if "band" in ds.dims and ds.sizes["band"] == 1:
         ds = ds.squeeze("band", drop=True)
-    # Add time coordinate from filename. Monthly/COG names carry YYYY.MM
-    # (e.g. chirps-v3.0.2020.01.cog); annual rasters carry only the year
-    # (e.g. chirps-v2.0.2020.tif), in which case we stamp January 1.
-    if "time" not in ds.dims:
-        m = re.search(r'(\d{4})\.(\d{2})', url)
-        if m:
-            ts = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")
-            ds = ds.expand_dims(time=[ts])
-        else:
-            ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
-            if ym:
-                ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
+    return ds
+
+
+def _open_cog_subset(url, region, variable=None, fill_value=None, timestamp=None):
+    """`_open_raster` plus a time coordinate.
+
+    ``timestamp`` stamps the raster explicitly — needed for sub-monthly cadences
+    (a dekad/pentad index in the filename can't be read back unambiguously). When
+    it is ``None``, the timestamp is inferred from the filename: monthly/COG
+    names carry YYYY.MM (e.g. chirps-v3.0.2020.01.cog); annual rasters carry only
+    the year (e.g. chirps-v2.0.2020.tif), stamped January 1.
+    """
+    ds = _open_raster(url, region, variable=variable, fill_value=fill_value)
+    if "time" in ds.dims:
+        return ds
+    if timestamp is not None:
+        return ds.expand_dims(time=[pd.Timestamp(timestamp)])
+    m = re.search(r'(\d{4})\.(\d{2})', url)
+    if m:
+        ds = ds.expand_dims(time=[pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")])
+    else:
+        ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
+        if ym:
+            ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
     return ds
 
 
@@ -183,26 +251,25 @@ class HTTPAdapter(AdapterBase):
         base_url = product_config["source_url"]
         fmt = product_config.get("format", "netcdf")
 
+        issuance = issuance_config(product_config)
+        if issuance is not None:
+            return self._fetch_issuance(
+                product_config, variable, issuance, base_url, fmt, region,
+                rate_limiter, max_retries, retry_backoff, verbose, progress,
+                allow_partial,
+            )
+
         file_pattern = product_config.get("file_pattern")
         if not file_pattern:
             raise ValueError("HTTP adapter requires 'file_pattern' in product config")
 
-        if date_range:
-            y0, y1 = date_range
-            if "{month" in file_pattern:
-                files = [file_pattern.format(year=y, month=m) for y in range(y0, y1 + 1) for m in range(1, 13)]
-            else:
-                files = [file_pattern.format(year=y) for y in range(y0, y1 + 1)]
-        else:
-            # Default to 2 months ago to account for observational data processing lag
-            from datetime import datetime, timedelta
-            recent = datetime.now().replace(day=1) - timedelta(days=60)
-            if "{month" in file_pattern:
-                files = [file_pattern.format(year=recent.year, month=recent.month)]
-            else:
-                files = [file_pattern.format(year=recent.year)]
+        # (filename, timestamp) pairs. timestamp is explicit for sub-monthly
+        # cadences (dekad/pentad), else None and inferred by the opener.
+        entries = _enumerate_timeseries(file_pattern, date_range, product_config)
+        base = base_url.rstrip("/")
+        urls = [f"{base}/{f}" for f, _ in entries]
+        stamps = [ts for _, ts in entries]
 
-        urls = [base_url.rstrip("/") + "/" + f for f in files]
         # NetCDF downloads run in a worker pool capped per-product (COG/TIF is
         # always sequential, so its worker count is 1).
         netcdf_workers = _resolve_max_workers(product_config, len(urls))
@@ -218,12 +285,14 @@ class HTTPAdapter(AdapterBase):
             fill_value = var_cfg.get("fill_value")
             datasets = []
             failures = []
-            for url in _iter(urls, "Rosetta HTTP download", enabled=progress):
+            for url, ts in _iter(list(zip(urls, stamps)), "Rosetta HTTP download",
+                                 enabled=progress):
                 rate_limiter.wait()
                 try:
                     ds = _with_retry(
-                        lambda u=url: _open_cog_subset(
-                            u, region, variable=native_name, fill_value=fill_value),
+                        lambda u=url, t=ts: _open_cog_subset(
+                            u, region, variable=native_name, fill_value=fill_value,
+                            timestamp=t),
                         max_retries, retry_backoff,
                         label=f"COG open {url}", verbose=verbose,
                     )
@@ -245,6 +314,105 @@ class HTTPAdapter(AdapterBase):
         if not datasets:
             raise RuntimeError("No data files retrieved")
         return xr.concat(datasets, dim="time") if len(datasets) > 1 else datasets[0]
+
+    def _fetch_issuance(self, product_config, variable, issuance, base_url, fmt,
+                        region, rate_limiter, max_retries, retry_backoff, verbose,
+                        progress, allow_partial):
+        """Fetch an issuance-keyed forecast archive into (init_time, lead_time, y, x).
+
+        One file per (issuance date, lead). Files are opened without any
+        filename time-sniffing — the coordinates come from the enumeration that
+        built the URL, which is the only place that knows what each file means.
+        """
+        init_dates = product_config.get("_init_dates")
+        if not init_dates:
+            raise ValueError(
+                "this product is issuance-keyed (its catalog entry has an "
+                "'issuance' block), so fetch() needs init=... — a 'YYYY-MM-DD' "
+                "issuance date, or a sequence of them."
+            )
+        files = enumerate_files(base_url, issuance, init_dates)
+        var_cfg = product_config.get("variables", {}).get(variable, {})
+        native_name = var_cfg.get("native_name", variable)
+        fill_value = var_cfg.get("fill_value")
+
+        if verbose:
+            print(f"[rosetta:http] downloading {len(files)} issuance file(s) "
+                  f"({len(init_dates)} init x {len(issuance['leads'])} lead, "
+                  f"format={fmt}, request_interval={rate_limiter.min_interval}s)")
+
+        opened, failures = {}, []
+        for handle in _iter(files, "Rosetta issuance download", enabled=progress):
+            rate_limiter.wait()
+            try:
+                opened[(handle.init, handle.lead)] = _with_retry(
+                    lambda h=handle: self._open_issuance_file(
+                        h.url, fmt, region, native_name, fill_value,
+                        max_retries, retry_backoff, verbose),
+                    max_retries, retry_backoff,
+                    label=f"issuance open {handle.url}", verbose=verbose,
+                )
+            except Exception as e:
+                failures.append((handle.url, e))
+                print(f"Error fetching {handle.url}: {e}")
+
+        if failures and not allow_partial:
+            raise RuntimeError(
+                f"HTTP adapter: {len(failures)}/{len(files)} issuance file(s) failed; "
+                f"refusing to return partial data (pass allow_partial=True to "
+                f"fetch() to override). First failure: {failures[0][0]}: {failures[0][1]}"
+            )
+        if not opened:
+            raise RuntimeError("No data files retrieved")
+
+        return self._assemble_issuance(opened, issuance, allow_partial)
+
+    @staticmethod
+    def _open_issuance_file(url, fmt, region, native_name, fill_value,
+                            max_retries, retry_backoff, verbose):
+        if fmt in ("cog", "tif"):
+            return _open_raster(url, region, variable=native_name,
+                                fill_value=fill_value)
+        _, ds = HTTPAdapter._download_one(url, region, None, max_retries,
+                                          retry_backoff, verbose)
+        return ds
+
+    @staticmethod
+    def _assemble_issuance(opened, issuance, allow_partial):
+        """(init, lead) -> dataset, into a (init_time, lead_time, ...) cube.
+
+        With allow_partial the grid can be ragged, so leads are reindexed to the
+        declared full set: a missing lead becomes NaN rather than silently
+        shifting every later lead down by one.
+        """
+        leads = issuance["leads"]
+        lead_coord = lead_timedelta(leads, issuance["lead_units"])
+        inits = sorted({init for init, _ in opened})
+
+        per_init = []
+        for init in inits:
+            present = [lead for lead in leads if (init, lead) in opened]
+            if not present:
+                continue
+            stacked = xr.concat(
+                [opened[(init, lead)] for lead in present],
+                dim=xr.IndexVariable(
+                    "lead_time", lead_timedelta(present, issuance["lead_units"])),
+            )
+            if len(present) != len(leads):
+                stacked = stacked.reindex(lead_time=lead_coord)
+            per_init.append(stacked)
+
+        combined = xr.concat(
+            per_init,
+            dim=xr.IndexVariable("init_time", np.array(inits, dtype="datetime64[ns]")),
+        )
+        # valid_time is what an observation would be stamped with, so a forecast
+        # can be verified without the caller re-deriving it.
+        combined = combined.assign_coords(
+            valid_time=combined.init_time + combined.lead_time
+        )
+        return combined
 
     @staticmethod
     def _download_one(url, region, rate_limiter=None, max_retries=0, backoff=0.0,

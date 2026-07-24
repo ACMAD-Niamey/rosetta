@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -115,6 +117,90 @@ def clip_to_geometry(ds, geometry, all_touched=False):
     return clipped
 
 
+def select_lon(ds, lon_w, lon_e, lon_name="lon"):
+    """Longitude subselection that is robust to the source's longitude convention.
+
+    A bbox given in the −180..180 convention against a 0..360 source (or vice versa)
+    would otherwise silently under-select — e.g. ``slice(-180, 180)`` on a 0..358 grid
+    returns only 0..180, dropping the Pacific and half the Atlantic. This:
+      * returns all longitudes when a full-globe span is requested,
+      * translates the requested bounds into the data's convention, and
+      * handles a box that wraps the seam (west > east after translation) by selecting
+        both sides and concatenating.
+
+    Shared by the OPeNDAP adapter (pre-normalize, dim may be ``X``) and ``normalize``
+    (dim ``lon``), since the source convention is only known once the data is opened.
+    """
+    if lon_name not in ds.dims or ds.sizes.get(lon_name, 0) == 0:
+        return ds
+    lon = ds[lon_name].values
+    # slice(...) needs a monotonic index; a seam-crossing region selected upstream
+    # (e.g. by the adapter) can arrive non-monotonic. Sort ascending first.
+    if lon.size > 1 and not (np.all(np.diff(lon) > 0) or np.all(np.diff(lon) < 0)):
+        ds = ds.sortby(lon_name)
+        lon = ds[lon_name].values
+    lo, hi = float(np.nanmin(lon)), float(np.nanmax(lon))
+
+    # Full-globe request -> keep everything (this is the −180..180 vs 0..360 footgun).
+    if (lon_e - lon_w) >= 359.0:
+        return ds
+
+    data_0_360 = hi > 180.0
+    w, e = lon_w, lon_e
+    if data_0_360:
+        # data in 0..360: map any negative requested bound into 0..360
+        if w < 0:
+            w += 360.0
+        if e < 0:
+            e += 360.0
+    else:
+        # data in −180..180: map any requested bound above 180 into −180..180
+        if w > 180.0:
+            w -= 360.0
+        if e > 180.0:
+            e -= 360.0
+
+    if w <= e:
+        out = ds.sel({lon_name: slice(w, e)})
+    else:
+        # box wraps the seam (e.g. Atlantic −70..20 -> 290..20 in 0..360)
+        out = xr.concat([ds.sel({lon_name: slice(w, hi)}),
+                         ds.sel({lon_name: slice(lo, e)})], dim=lon_name)
+
+    if out.sizes.get(lon_name, 0) == 0:
+        warnings.warn(
+            f"Longitude selection [{lon_w}, {lon_e}] returned no cells against a "
+            f"source spanning [{lo:.1f}, {hi:.1f}]. Check the longitude convention "
+            f"(the source uses {'0..360' if data_0_360 else '-180..180'}).",
+            stacklevel=2,
+        )
+    return out
+
+
+def sanitize_for_netcdf(ds):
+    """Return a copy that round-trips cleanly through ``to_netcdf`` (netCDF4 engine).
+
+    OPeNDAP/CF sources arrive with CF bounds variables (``time_bnds`` over an ``nbnds``
+    dimension) and inherited variable encoding (``source``, ``original_shape``) left over
+    from the remote store. Those make ``to_netcdf`` raise ``NetCDF: String match to name
+    in use``, and — importantly — clearing ``.encoding`` or dropping the bounds var *in
+    place* does not fix it (stale index/variable encoding survives). Rebuilding the dataset
+    from fresh arrays does. Data is already materialized by the time this runs, so the
+    rebuild is a cheap copy and preserves values, coords, dims, and attrs.
+    """
+    drop = [v for v in ds.variables
+            if "bnd" in str(v).lower() or "bound" in str(v).lower()]
+    ds = ds.drop_vars(drop, errors="ignore")
+    coords = {c: (ds[c].dims, np.asarray(ds[c].values),
+                  {k: a for k, a in ds[c].attrs.items() if k != "bounds"})
+              for c in ds.coords}
+    data_vars = {v: (ds[v].dims, np.asarray(ds[v].values),
+                     {k: a for k, a in ds[v].attrs.items() if k != "bounds"})
+                 for v in ds.data_vars}
+    attrs = {k: a for k, a in ds.attrs.items() if k != "_NCProperties"}
+    return xr.Dataset(data_vars, coords=coords, attrs=attrs)
+
+
 def normalize(ds, product_config, variable, region=None, geometry=None,
               boundary="center", year_index=False):
     ds = _decode_numeric_times(ds)
@@ -206,7 +292,8 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
                      if ds.sizes.get("lon", 0) > 1 else 0.0)
             lat_s, lat_n = lat_s - r_lat, lat_n + r_lat
             lon_w, lon_e = lon_w - r_lon, lon_e + r_lon
-        ds = ds.sel(lat=slice(lat_s, lat_n), lon=slice(lon_w, lon_e))
+        ds = ds.sel(lat=slice(lat_s, lat_n))
+        ds = select_lon(ds, lon_w, lon_e)
 
     for coord, attr in [("lat", "Y"), ("lon", "X"), ("time", "T"), ("init_time", "T")]:
         if coord in ds.coords:

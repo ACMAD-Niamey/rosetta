@@ -203,3 +203,30 @@ def test_same_c3s_system_has_same_hindcast_range():
         if len(set(entries.values())) > 1:
             bad.append(("/".join(entries), f"C3S {syskey} has mismatched hindcast_range: {entries}"))
     assert not bad, "Inconsistent reforecast periods within one C3S system:\n" + _fmt(bad)
+
+
+def test_issuance_blocks_are_well_formed():
+    """An `issuance` block declares how to locate one file per (init, lead).
+    A typo in its patterns or lead range is a 404 at fetch time, so validate the
+    block structurally here rather than discovering it against a live server."""
+    from rosetta.adapters._issuance import issuance_config
+
+    bad = []
+    for k, v in REAL.items():
+        if "issuance" not in v:
+            continue
+        if v.get("adapter") != "http":
+            bad.append((k, f"issuance blocks are only served by the http adapter, "
+                           f"not {v.get('adapter')!r}"))
+        try:
+            cfg = issuance_config(v)
+        except ValueError as e:
+            bad.append((k, f"invalid issuance block: {e}")); continue
+        if "{init" not in cfg["file_pattern"] and "{valid" not in cfg["file_pattern"] \
+                and "{lead" not in cfg["file_pattern"]:
+            bad.append((k, "file_pattern names none of {init}, {valid} or {lead}, "
+                           "so every lead would resolve to the same URL"))
+        if len(cfg["leads"]) > 1 and "{init" in cfg["file_pattern"] \
+                and "{valid" not in cfg["file_pattern"] and "{lead" not in cfg["file_pattern"]:
+            bad.append((k, "multiple leads but the filename varies only with init"))
+    assert not bad, "Malformed issuance blocks:\n" + _fmt(bad)

@@ -400,14 +400,17 @@ def test_http_adapter_rate_limiter_paces_real_requests(tmp_path):
         server.stop()
 
 
-# ── Observational SST (ERSST v5, NOAA NCEI HTTP) ────────────────────────────
+# ── Observational SST (ERSST v5, NOAA PSL OPeNDAP) ──────────────────────────
 # Tests cover: two geographies, two non-adjacent years, multi-year series.
+# These were written against a planned `sst/ersst-v5` product that was never
+# implemented; the product now exists as `obs/ersst-v5` (the catalog's `obs/`
+# channel convention, as with obs/era5, which also carries sst).
 
 @pytest.mark.integration
 @pytest.mark.network
 def test_fetch_ersst_v5_east_africa_recent():
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2020, 2020),
         region=[-20, 20, 20, 55],
@@ -426,7 +429,7 @@ def test_fetch_ersst_v5_west_pacific_historical():
     # Warm-pool region, well inside 0..360 longitude convention
     region = [-10, 10, 140, 180]
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2000, 2000),
         region=region,
@@ -443,7 +446,7 @@ def test_fetch_ersst_v5_west_pacific_historical():
 @pytest.mark.network
 def test_fetch_ersst_v5_multiyear_timeseries():
     ds = rosetta.fetch(
-        product="sst/ersst-v5",
+        product="obs/ersst-v5",
         variable="sst",
         hindcast=(2010, 2012),
         region=[-20, 20, 20, 55],
@@ -942,3 +945,44 @@ def test_cache_keys_on_region_not_just_product():
     assert float(k.lon.min()) > 30, "Kenya extent unexpected"
     assert float(n.lon.max()) < 20, \
         "Nigeria returned Kenya's cached data — region missing from cache key"
+
+
+# ── CHC issuance-keyed forecasts (CHIRPS-GEFS) ─────────────────────────────
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_fetch_chirps_gefs_daily_single_issuance():
+    """One real issuance from the live CHC server: 16 daily leads as a
+    (init_time, lead_time, lat, lon) cube. Guards the catalog's URL templates
+    against an upstream layout change."""
+    ds = rosetta.fetch(
+        product="chc/chirps-gefs-daily", variable="precip",
+        init="2026-07-05", region=REGION, verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds.sizes["init_time"] == 1
+    assert ds.sizes["lead_time"] == 16
+    assert ds["precip"].attrs["units"] == "mm/day"
+    # valid_time = init + lead; normalize maps it onto the canonical `time`.
+    assert str(ds.time.isel(init_time=0, lead_time=15).values)[:10] == "2026-07-20"
+    assert float(ds["precip"].min()) >= 0.0
+
+
+@pytest.mark.integration
+@pytest.mark.network
+def test_fetch_chirps_gefs_across_many_issuances():
+    """The hindcast-skill fetch: the same calendar issuance of several years,
+    stacked on init_time. Uses the 15-day accumulation product (one raster per
+    issuance) to keep the pull small."""
+    inits = [f"{year}-06-30" for year in (2015, 2016, 2017)]
+    ds = rosetta.fetch(
+        product="chc/chirps-gefs-15day", variable="precip",
+        init=inits, region=REGION, verbose=True,
+    )
+    _check_dataset(ds, "precip", REGION)
+    assert ds.sizes["init_time"] == 3
+    assert ds.sizes["lead_time"] == 1
+    assert ds["precip"].attrs["units"] == "mm"
+    years = [str(v)[:4] for v in ds.init_time.values]
+    assert years == ["2015", "2016", "2017"]

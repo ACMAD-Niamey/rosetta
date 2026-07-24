@@ -136,6 +136,8 @@ nmme/ccsm4:
 # acc.ord S3 archive (nmme/cesm1-hindcast, now a deprecated alias) to CCSR.
 nmme/cesm1:
   adapter: ccsr
+  single_year_fetch: true   # per-year DAP requests; the full-range hindcast request overflows the
+                            # CCSR server and silently zero-fills (matches ccsm4). See safe_fetch.
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CESM1"
   variables:
     precip:
@@ -163,6 +165,8 @@ nmme/cesm1:
 
 nmme/geoss2s:
   adapter: ccsr
+  single_year_fetch: true   # per-year DAP requests; the full-range hindcast request overflows the
+                            # CCSR server and silently zero-fills (matches ccsm4). See safe_fetch.
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/NASA-GMAO/GEOSS2S"
   split_streams: true
   variables:
@@ -927,6 +931,53 @@ obs/chirps-v3-dekad:
     temporal: dekad
   notes: "Native UCSB CHIRPS v3.0 calendar dekad (10-day totals, mm). One NetCDF per year. Distinct from obs/chirps-v2-dekadal-rhiza (10-day ROLLING)."
 
+# CHIRPS v3 calendar-dekad GeoTIFFs (0.05°), one raster per dekad. Unlike the
+# whole-year NetCDF above (obs/chirps-v3-dekad), these are HTTP range-read per
+# region, so a region-cropped multi-decade climatology is a stream of small
+# reads rather than tens of GiB of downloads. The `{dekad}` field (1/2/3, the
+# 10-day slices starting day 1/11/21) is templated by the http adapter, which
+# stamps each raster's timestamp explicitly. Final (gauge-corrected) stream.
+obs/chirps-v3-dekad-tif:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/dekads/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.{dekad}.tif"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 10-day calendar dekad accumulation
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [1981, 2025]
+    temporal: dekad
+  notes: "CHIRPS v3.0 calendar-dekad GeoTIFFs (range-readable). Final stream; for the near-real-time tail use obs/chirps-v3-dekad-prelim."
+
+# Preliminary near-real-time dekad stream (~1-dekad lag), for the current season
+# before the final gauge-corrected product catches up. Same grid and format as
+# the final tif dekad above, different source directory.
+obs/chirps-v3-dekad-prelim:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/prelim/dekads/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.{dekad}.tif"
+  format: tif
+  request_interval: 3.0
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    forecast_range: [2024, null]   # rolling near-real-time feed; not a fixed archive
+    temporal: dekad
+  notes: "CHIRPS v3.0 PRELIMINARY calendar-dekad GeoTIFFs (~1-dekad lag). Use for the current season; splice onto obs/chirps-v3-dekad-tif for the completed record."
+
 obs/chirps-v3-annual:
   adapter: http
   source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/annual/global/tifs/"
@@ -1102,6 +1153,84 @@ c3s/ecmwf-seas51c:
     # appended route may be trimmed. Verify before relying on the start year.
     hindcast_range: [1993, 2016]
 
+# ---------------------------------------------------------------------------
+# CHC forecast products (data.chc.ucsb.edu)
+#
+# Issuance-keyed: one file per (issuance date, lead), located by the `issuance`
+# block's strftime templates over {init}, {valid} and {lead}. Fetch them with
+# init="YYYY-MM-DD", or with a sequence of such dates to stack many issuances
+# on init_time (e.g. the June-30 forecast of every hindcast year).
+#
+# CHIRPS3-GEFS is GEFSv12 bias-corrected to the CHIRPS3 distribution and
+# downscaled with IMERGv7-Late. Its record has a deliberate hole: GEFS
+# reforecasts start January 2000 but the IMERG used to downscale them starts
+# June 2000, and the operational GEFSv12 stream begins September 2020 — so CHC
+# publishes complete years only, 2001-2019 (reforecast) and 2021-present. That
+# 2001-2019 span is what makes a real hindcast-skill analysis possible.
+#
+# The older CHIRPS2-GEFS stream (products/EWX/.../CHIRPS-GEFS_precip_v12) was
+# discontinued on 2026-07-01 and is deliberately not catalogued.
+# ---------------------------------------------------------------------------
+chc/chirps-gefs-daily:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-GEFS/v3/daily/global/"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  issuance:
+    # Directory = issuance date, filename = valid date. Lead 0 is the issuance
+    # day itself, so a "15-day forecast" spans leads 0-14; the archive carries
+    # one more (16 files per issuance).
+    path_pattern: "{init:%Y}/{init:%m}/{init:%d}"
+    file_pattern: "c3g_{valid:%Y}.{valid:%m}.{valid:%d}.tif"
+    leads: [0, 15]
+    lead_units: days
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [2001, 2019]   # GEFSv12 reforecast era
+    forecast_range: [2021, null]   # operational; 2020 deliberately absent
+    temporal: daily
+  notes: >-
+    CHIRPS3-GEFS daily precipitation forecast, 16 leads per issuance, issued
+    daily. Aggregate to dekads/pentads downstream (deepscale.accumulate) rather
+    than fetching CHC's separate dekad product, which is keyed by target dekad
+    rather than by issuance and so does not fit the issuance templating.
+
+chc/chirps-gefs-15day:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS-GEFS/v3/15_day/global/data/"
+  format: tif
+  request_interval: 3.0
+  issuance:
+    # One accumulated 15-day total per issuance: no lead dimension, and the
+    # filename carries the init date rather than a valid date.
+    path_pattern: "{init:%Y}"
+    file_pattern: "c3g_{init:%Y}.{init:%m}.{init:%d}.tif"
+    leads: [0, 0]
+    lead_units: days
+  variables:
+    precip:
+      native_name: precip
+      units: "mm"          # 15-day accumulation, left as a total
+      target_units: "mm"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    hindcast_range: [2001, 2019]
+    forecast_range: [2021, null]
+    temporal: 15day
+  notes: >-
+    CHIRPS3-GEFS 15-day accumulated precipitation total, one raster per
+    issuance. lead_time is a singleton (0 days) spanning the [init, init+15d)
+    window, so valid_time marks the window's start, not its end.
+
 c3s/ecmwf-s2s:
   adapter: cds
   cds_dataset: "s2s-forecasts"
@@ -1135,6 +1264,33 @@ c3s/ecmwf-s2s:
     hindcast_range: null   # on-the-fly reforecast keyed to each forecast's calendar week (see note below) — no fixed window
   # Hindcast availability depends on the issuance date — ECMWF S2S provides
   # on-the-fly reforecasts for the same calendar week, not a static range.
+
+obs/ersst-v5:
+  adapter: opendap
+  # NOAA PSL THREDDS. One NetCDF per variable, served whole — no Ingrid variable
+  # path segment — so url_template overrides the IRIDL default.
+  source_url: "https://psl.noaa.gov/thredds/dodsC/Datasets/noaa.ersst.v5/sst.mnmean.nc"
+  url_template: "{base}"
+  decode_times: true      # ordinary "days since 1800-1-1", unlike NMME's "months since"
+  # Probed 2026-07-09: a 120-month global request returns real data; 240 months
+  # comes back zero-filled, with netCDF4 printing "DAP DATADDS packet is
+  # apparently too short" to stderr and raising nothing. Chunk well under that.
+  max_request_years: 5
+  variables:
+    sst:
+      native_name: sst
+      units: degC        # as the file declares it
+      target_units: C    # rosetta's canonical Celsius label (see _CONVERSIONS)
+  grid:
+    lat_res: 2.0
+    lon_res: 2.0
+    hindcast_range: [1954, 2026]
+    temporal: monthly
+  notes: >-
+    NOAA Extended Reconstructed SST v5, 2° monthly, 1854-present (catalogued
+    from 1954; the 19th-century record is sparse). The reference SST dataset for
+    the 1991-2020 WMO baseline used by ONI/RONI/IOD index verification. Latitude
+    is stored north-to-south upstream; the adapter sorts it ascending.
 
 obs/era5:
   adapter: cds
@@ -1315,3 +1471,60 @@ nmme/cansipsic4:
 
 nmme/cansipsic4-hindcast:
   alias_of: "nmme/cansipsic4"   # deprecated: hindcast is the same product, hindcast stream
+
+# ============================================================================
+# ACMAD predictands (added on the `acmad` branch — ACMAD seasonal-forecast
+# replication). Observed rainfall the CPT/CCA outlook is calibrated against, from
+# NATIVE data stores (NOAA PSL / JASMIN) — no IRI Data Library dependency. Both
+# are OBSERVED gridded series: season selection is done downstream via
+# fetch(..., seasonal=...); coarsen with grid_res=/regrid_to= for CCA. The
+# CPC-merged-precip predictand is obs/cmap (below, NOAA PSL OpenDAP) — the
+# natively-served member of the CAMS-OPI lineage.
+# ============================================================================
+
+# TAMSAT v3.1 monthly rainfall (Univ. Reading) — ACMAD's second (land-only)
+# predictand. JASMIN public HTTP, one NetCDF per month. Native 0.0375deg over
+# Africa (~3.7M cells) — far too fine for CCA; coarsen (grid_res=0.5 /
+# regrid_to=) as the reproduction did.
+obs/tamsat:
+  adapter: http
+  source_url: "https://gws-access.jasmin.ac.uk/public/tamsat/rfe/data/v3.1/monthly"
+  file_pattern: "{year}/{month:02d}/rfe{year}_{month:02d}.v3.1.nc"
+  format: netcdf
+  request_interval: 0.5
+  variables:
+    precip:
+      native_name: rfe
+      units: "mm/month"
+      target_units: "mm/month"
+      fill_value: -999.0
+  grid:
+    lat_res: 0.0375
+    lon_res: 0.0375
+    hindcast_range: [1983, 2025]
+    temporal: monthly
+  notes: "TAMSAT v3.1 monthly RFE (Reading), JASMIN public. Land-only; coarsen for CCA."
+
+# CPC Merged Analysis of Precipitation (CMAP), standard gauge+satellite merge —
+# the natively-served NetCDF member of the CPC merged-precip lineage that ACMAD's
+# IRIDL-only CAMS-OPI belongs to. NOAA PSL THREDDS/OpenDAP (whole-file), 2.5deg
+# monthly, no auth and no IRIDL. Chunk reads (max_request_years) to dodge the DAP
+# truncation the PSL server does on long requests (same as ERSSTv5). Coarsen with
+# grid_res=/regrid_to= for the forecast grid.
+obs/cmap:
+  adapter: opendap
+  source_url: "https://psl.noaa.gov/thredds/dodsC/Datasets/cmap/std/precip.mon.mean.nc"
+  url_template: "{base}"
+  decode_times: true
+  max_request_years: 5
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 2.5
+    lon_res: 2.5
+    hindcast_range: [1979, 2026]
+    temporal: monthly
+  notes: "CPC CMAP standard (gauge+satellite) monthly precip, 2.5deg. NOAA PSL, no IRIDL. CAMS-OPI-lineage predictand."
