@@ -27,6 +27,8 @@
    | mm | mm/day | identity (already mm per 24 h) |
 
    `da.attrs["units"]` is set to `target_units`.
+
+   **Verify units in practice — conversion is attrs-driven and not bulletproof.** The `mm → mm/day` identity assumes "mm per 24 h" (true for deaccumulated S2S leads); a source serving *monthly totals* labeled `mm` passes through unconverted, and `mm/month ÷ 30` is an approximation. CCSR NMME precip has repeatedly been observed arriving as monthly totals (~100 mm where ERA5 says ~3 mm/day). Before mixing products, check `da.attrs["units"]` and sanity-check magnitudes against a known-rate product; convert totals exactly with days-per-month (`calendar.monthrange`). A cheap guard when looping over mixed rosters: treat the field as a rate only if `"day"`, `"/d"`, or `"d-1"` appears in the units string.
 9. **Fill-value masking** — catalog `fill_value` (e.g. -9999) -> NaN.
 10. **Latitude ascending** — `ds.sortby("lat")`. Canonical convention: lat always ascending.
 11. **Spatial selection** — polygon clip (`clip_to_geometry`, rioxarray `.rio.clip`, `all_touched = (boundary == "cover")`) when a geometry was given; otherwise bbox `.sel(lat=slice, lon=slice)` (cover mode expands by half a grid cell).
@@ -42,6 +44,33 @@
 ## Season strings
 
 `SEASON_MONTHS` (start_month, end_month): DJF (12,2), JFM (1,3), FMA (2,4), MAM (3,5), AMJ (4,6), MJJ (5,7), JJA (6,8), JAS (7,9), ASO (8,10), SON (9,11), OND (10,12), NDJ (11,1). Wraparound seasons (end < start) roll into the following year; `seasonal="mean"` does not support them.
+
+### Year labeling at multi-month leads (wraparound bookkeeping)
+
+At an operational lead (e.g. 2 months: MAM initialized in January), early-year targets put the init in the **previous calendar year** — JFM targeted from November, FMA from December. `year_index=True` labels years from `init_time`, so when aligning such forecasts with obs labeled by *target* year, add +1 to the forecast's year for those seasons (compute the init month mod-12 and offset when it wraps). Two further rules from downstream use:
+
+- **Rectangular multi-season cubes:** when stacking several seasons into one `(season, year, ...)` cube (e.g. for deepscale's `seasonal_coefficients`), *intersect* the years available across all seasons rather than union them — wraparound seasons otherwise NaN-pad the cube.
+- The `init_time → year` rename is what `year_index=True` does for you; for obs use `seasonal="mean"` (which yields a `year` dim directly). Prefer these over hand-rolled `.dt.year` renames.
+
+## Issuance-keyed forecasts (`init_time` / `lead_time` / `valid_time`)
+
+Short-range products with an `issuance` catalog block (CHIRPS-GEFS: `chc/chirps-gefs-daily`, `chc/chirps-gefs-15day`) are addressed by issuance date, not by season. Fetch them with `init="YYYY-MM-DD"` (one issuance) or a **sequence** of `YYYY-MM-DD` dates — the hindcast-skill case, where you want the same calendar issuance across many years. A sequence stacks the result on `init_time`.
+
+Output layout:
+
+- `init_time` — the issuance date(s) (`datetime64`).
+- `lead_time` — numeric lead in the product's `lead_units` (days for CHIRPS-GEFS). `chc/chirps-gefs-daily` carries 16 daily leads (0-15, where lead 0 is the issuance day); `chc/chirps-gefs-15day` carries a single lead (the 15-day accumulation window).
+- `valid_time` — the target date each `(init_time, lead_time)` pair verifies against. **For `chc/chirps-gefs-15day`, `valid_time` marks the window's START** ([init, init+15d)), not its end.
+
+A season `target` cannot combine with an issuance sequence (target selects leads relative to one init); fetch the leads and select the target window afterwards. A sequence passed to a non-issuance product raises `ValueError`.
+
+## Longitude-convention helpers (`normalize.py`, `fetch.py`)
+
+The 0-360 vs -180..180 longitude footgun is now handled by named helpers rather than ad-hoc slicing:
+
+- `normalize.select_lon(ds, lon_w, lon_e, lon_name="lon")` — convention-aware longitude subselection. Short-circuits to "return everything" on a full-globe request (span ≥ 359°), translates the requested bounds into the source's convention, and handles a seam-crossing box (west > east after translation) by selecting both sides and concatenating. Shared by the OPeNDAP adapter (pre-normalize, dim may be `X`) and `normalize` (dim `lon`), because the source convention is only known once the data is opened.
+- `fetch._match_lon_convention(obj, target_lons)` — used by regrid/interp (`grid_res`/`regrid_to`): rolls the source's longitude into the target grid's convention (and re-sorts) before `.interp`, so interpolating a 0-360 source onto a grid with negative longitudes doesn't silently NaN the western band.
+- `normalize.sanitize_for_netcdf(ds)` — rebuilds a dataset from fresh arrays (dropping CF bounds vars and stale inherited encoding) so OPeNDAP/CF results round-trip through `to_netcdf` instead of raising `NetCDF: String match to name in use`. Applied to every `fetch` result.
 
 ## Downstream contract (deepscale)
 

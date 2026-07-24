@@ -1,6 +1,6 @@
 # Rosetta API reference
 
-Import name is `rosetta` (distribution: `accord-rosetta`). Top-level exports: `catalog`, `fetch`, `parse_target`, `parse_init`, `assemble`, `check_product`, `check_all_products`.
+Import name is `rosetta` (distribution: `accord-rosetta`). Top-level exports: `catalog`, `fetch`, `zonal`, `parse_target`, `parse_init`, `assemble`, `obs_predictor`, `check_product`, `check_all_products`.
 
 At import time rosetta pins the nuthatch cache root via `os.environ.setdefault("NUTHATCH_ROOT_FILESYSTEM", ...)` / `NUTHATCH_LOCAL_FILESYSTEM` to `file://<ROSETTA_CACHE_DIR or ~/.nuthatch/caches>`. Set `ROSETTA_CACHE_DIR` **before** importing rosetta to relocate the cache.
 
@@ -12,7 +12,8 @@ def fetch(product, variable, init=None, target=None, region=None,
           progress=True, cache=True, allow_partial=False,
           max_retries=3, retry_backoff=1.0, request_interval=0.0,
           reforecast=False, boundary="center", region_buffer=1.5,
-          year_index=False, seasonal=None, grid_res=None, regrid_to=None)
+          year_index=False, seasonal=None, grid_res=None, regrid_to=None,
+          months=None, degenerate_attempts=1)
     -> xr.Dataset
 ```
 
@@ -20,7 +21,7 @@ def fetch(product, variable, init=None, target=None, region=None,
 |---|---|---|
 | `product` | str, required | Catalog id, e.g. `"nmme/cfsv2"`, `"obs/era5"`. See `references/products.md`. |
 | `variable` | str, required | Canonical variable: `precip`, `temp`, or `sst` (availability per product). |
-| `init` | str \| datetime \| None | `"YYYY-MM"` = seasonal monthly init (sets `init_months`); `"YYYY-MM-DD"` = S2S daily issuance (also sets the internal `_init_date`). |
+| `init` | str \| datetime \| sequence \| None | `"YYYY-MM"` = seasonal monthly init (sets `init_months`); `"YYYY-MM-DD"` = daily issuance (also sets the internal `_init_date`). A **sequence** of `YYYY-MM-DD` dates/datetimes is allowed **only** for products with an `issuance` catalog block (CHIRPS-GEFS): the result stacks on `init_time` with `lead_time`/`valid_time`. A sequence raises for non-issuance products and cannot combine with `target`. |
 | `target` | str \| (datetime, datetime) \| None | Season string (see season table below) or explicit start/end datetimes. Drives lead-month selection. |
 | `region` | list \| str \| geometry \| None | bbox `[lat_s, lat_n, lon_w, lon_e]`, `.shp` path, or shapely/geopandas geometry. |
 | `hindcast` | (int, int) \| None | `(start_year, end_year)` year range for the fetch. If omitted with `init`: defaults to `(init_year, init_year)`, or `(init_year-20, init_year-1)` when `reforecast=True`. |
@@ -40,6 +41,10 @@ def fetch(product, variable, init=None, target=None, region=None,
 | `seasonal` | None \| `"mean"` | `"mean"`: subset the target season's months on `time` and average to one value per calendar year (`time` -> `year`). Requires `target`. Wraparound seasons (NDJ, DJF) raise `NotImplementedError`. |
 | `grid_res` | float \| None | Regrid onto a regular lat/lon grid at this resolution spanning `region` (via `.interp`). Requires `region`. Mutually exclusive with `regrid_to`. |
 | `regrid_to` | xr.DataArray \| None | Regrid onto this array's `lat`/`lon` coordinates. |
+| `months` | list[int] \| None | Restrict an **observational** fetch to these calendar months (1-12). Rejected alongside `init` (which already names the issuance). For HTTP products stored one file per `(year, month)` it prunes the **download** (a 4-month season over 45 years is 180 files, not 540); for whole-file OPeNDAP it prunes only the result. Reuses the `init_months` cache slot, so it does not invalidate existing cache. Can pair with `seasonal="mean"` (average the selected months) in place of `target`. |
+| `degenerate_attempts` | int = 1 | **Opt-in** zero-fill/truncation guard for the general fetch path. Default `1` = **no validation** (behaviour unchanged). `>1` enables it: a cache-miss response is validated in `_fetch_raw` before being memoized, a cache **hit** is re-validated (catching entries poisoned before the guard existed), and a `DegenerateResponseError` triggers a cache-bypass retry up to this many attempts. See the caveat below — most fetches are **not** auto-protected. |
+
+**`degenerate_attempts` — what is and isn't protected.** The guard on the *general* path is opt-in: with the default `degenerate_attempts=1` rosetta does **not** validate any adapter's response against silent zero-fill/truncation. Pass `degenerate_attempts>1` to enable validation + cache-bypass retries for a fetch you don't trust (e.g. a large OPeNDAP pull). The **exception** is the OPeNDAP *observational chunk* path (`obs/ersst-v5`, `obs/cmap`): there the guard is **always on** and stricter (rejects all-NaN chunks too), independent of `degenerate_attempts`. Do not assume universal protection.
 
 Behavioral notes:
 
@@ -80,6 +85,53 @@ Multi-model fan-out over `fetch`, always with `year_index=True`.
 - `roster`: iterable of rows `(label, product, *ranges)` where each range is a `(start, end)` tuple; `range_index` (default 2 = third element) selects which range column is the hindcast window.
 - Returns `{label: (hindcast_da, forecast_da)}`. Each DataArray is canonicalized: a `member` dim is guaranteed (expanded to size 1 if absent — downstream code like deepscale does `hindcast.mean("member")`), stray non-dim coords (`number`/`member`/`spatial_ref`) are dropped, and dims are transposed to `(year, member, lat, lon)`.
 - Raises on the first per-row failure.
+
+## `obs_predictor()`
+
+```python
+def obs_predictor(product, variable, *, target=None, months=None, hindcast,
+                  forecast_year, region=None, grid_res=None, regrid_to=None,
+                  seasonal="mean", boundary="center", cache=True, verbose=True)
+    -> tuple[xr.DataArray, xr.DataArray]
+```
+
+The observations counterpart of `assemble()`: use an **observed** gridded field (e.g. ERSST SST) as a seasonal predictor track for a CCA. Returns the SAME canonical `(year, member, lat, lon)` `(hindcast, forecast)` pair a model would, so an observed predictor drops into `deepscale.seasonal_mme`'s `predictor_tracks` exactly like a model forecast.
+
+- Requires **exactly one** of `target` (a 3-month season string) or `months` (an explicit calendar-month list, e.g. `[6]` for a single-month June predictor) — passing both or neither raises `ValueError`.
+- `hindcast`: `(start_year, end_year)` training window. `forecast_year`: the single year to predict from.
+- `seasonal="mean"` (default) averages the selected month(s) per calendar year, so the training series and the single forecast year come from the same observed product. Observations carry no init/lead.
+- The returned `forecast` is the `forecast_year` slice: `year=[forecast_year]`, `member=[0]`.
+
+## `zonal()`
+
+```python
+def zonal(data, geometries, *, by=None, label=None, stat="mean",
+          weights="area", all_touched=False, dim="region",
+          lat="lat", lon="lon")
+    -> xr.DataArray | xr.Dataset
+```
+
+Reduce a gridded field over **many geometries at once** — one number per feature (a district, a woreda), the reporting question, as opposed to `fetch(region=...)` which dissolves features into one mask (the "data over this area" question). Every geometry is rasterized into a single integer label grid and the reduction is one `groupby` over that grid — one pass regardless of the number of regions. Needs the `geo` extra (geopandas + rasterio).
+
+| Param | Type / default | Meaning |
+|---|---|---|
+| `data` | DataArray \| Dataset, required | Must carry the `lat` and `lon` dims (names configurable). Every other dim is preserved. Needs a grid ≥ 2×2 to infer cell size. |
+| `geometries` | shapefile path \| GeoDataFrame \| GeoSeries \| list[shapely] | Reprojected to EPSG:4326 if a CRS is attached. **Not** dissolved — one output element per feature. |
+| `by` | str \| None | Column to index the output `dim` by (e.g. a unique admin code). **Must be unique** — raises `ValueError` on duplicate values. Defaults to the positional index. |
+| `label` | str \| None | Column carried as a companion `{dim}_label` coordinate (for display). **May repeat** — this is the clean way to keep human-readable names on a uniquely-indexed axis. |
+| `stat` | mean/sum/min/max/median/std/count | The reduction. `count` returns the number of contributing cells. |
+| `weights` | `"area"` (default) \| `"cos_lat"` \| None \| DataArray | Cell weighting. `"area"` and `"cos_lat"` are the same `cos(lat)` weighting under two names (a cell's area on a regular grid falls off as `cos(lat)`). **Only `mean` and `sum` use weights**; order statistics ignore them. |
+| `all_touched` | bool = False | Include every cell a geometry touches, not only those whose centre it contains. |
+| `dim` | str = `"region"` | Name of the new output axis that replaces `lat`/`lon`. |
+| `lat`, `lon` | str = `"lat"`/`"lon"` | Names of the spatial dims in `data`. |
+
+Returns the same type as `data` with `lat`/`lon` replaced by `dim`; output **mirrors the input geometry order and count** (a region with no valid cell yields NaN, or `0` for `count`, rather than being dropped). NaN cells are excluded from the reduction (a half-ocean district is averaged over its land).
+
+**Gotchas:**
+- On a **coarse grid**, a polygon smaller than one cell captures no cell centre and yields NaN — pass `all_touched=True` (though see next).
+- `all_touched=True` can make coverage **worse**, not better: neighbouring boundary cells contend, and `rasterio` uses last-one-wins, so a cell on a shared boundary is assigned to whichever feature rasterized last. Use it for small/coarse cases, not reflexively.
+- Admin **names are often non-unique** (two woredas share a name). Index `by` a unique id column (e.g. `shapeID`) and carry the name via `label=` — passing a non-unique column to `by` raises.
+- If no grid cell falls inside any geometry, raises `ValueError` (grid and geometries may not overlap, or regions are sub-cell — try `all_touched=True`).
 
 ## `catalog` module
 
