@@ -42,9 +42,22 @@ The s3 adapter shells out to the **AWS CLI** (`aws s3 ls/cp`) — configure `aws
 | `DeprecationWarning` on fetch | Product is an alias or date-deprecated — see `catalog.info(p)` for `successor` |
 | 401 / interactive auth prompt / fsspec `Protocol not known` touching `gs://sheerwater-datalake/...` | Ambient nuthatch config shadowing — see below |
 | GRIB decode errors | MARS/S2S need `cfgrib` + `eccodeslib` (installed by default); rosetta uses `decode_timedelta=False` to avoid an xarray non-nanosecond-timedelta assertion |
-| `ERR: DAP DATADDS packet is apparently too short` printed to **stderr** (no exception) | An OPeNDAP server (seen with NOAA PSL/THREDDS) truncated a large request; netCDF4 then returns a **plausible zero-filled array** — right shape/dtype, wrong data — which can reach the cache and re-serve on retry. Chunk big remote requests (e.g. ≤10 years of a global monthly field per request) and sanity-check (non-zero variance, land mask present) before trusting; purge poisoned entries with `rosetta cache clear --product X` |
+| `ERR: DAP DATADDS packet is apparently too short` printed to **stderr** | An OPeNDAP server (seen with NOAA PSL/THREDDS) truncated a large request; netCDF4 then returns a **plausible zero-filled array** — right shape/dtype, wrong data. See the silent-truncation guard section below for what is and isn't caught automatically. |
+| `DegenerateResponseError` | rosetta's guard rejected a bitwise-constant / zero-filled (or, on the OPeNDAP obs path, all-NaN) response before it reached the cache. For OPeNDAP obs (`obs/ersst-v5`, `obs/cmap`) this is always on — commonly it means a truncated chunk, or (for the ocean-only `obs/ersst-v5`) a **land-only bbox** that is legitimately all-NaN (request an ocean-containing region). On the general path it only fires when you passed `degenerate_attempts>1`; rosetta already retried with the cache bypassed, so a persistent error means the source itself is returning bad data. |
 | `AttributeError` on sheerwater's `chirps_raw_live` | Upstream sheerwater removed the near-real-time function; `obs/chirps-live-rhiza` fails until it is restored — for current-season CHIRPS use the native CHC products (subject to their rate limits) |
 | Full CrowdSec 403 on **every** CHC path including the site root | The IP ban is site-wide and time-limited (hours to days) — wait it out; don't retry, it can extend the ban |
+
+## OPeNDAP silent truncation and the degenerate-response guard
+
+A large OPeNDAP request against NOAA PSL / THREDDS can be truncated server-side: netCDF4 prints `ERR: DAP DATADDS packet is apparently too short` to **stderr** and then hands back a **plausible zero-filled array** (right shape and dtype, wrong data) with **no exception**. Left unchecked it reaches the cache and re-serves on retry.
+
+Rosetta now ships a guard (`reject_if_degenerate` / `DegenerateResponseError`) that detects a bitwise-constant, zero-filled, or all-NaN response. **It is not universal — know which path you are on:**
+
+- **OPeNDAP observational chunk path** (`obs/ersst-v5`, `obs/cmap`): the guard is **always on** and strict (`reject_all_nan=True`). Each product declares `max_request_years` (5), so the adapter loads the record in year blocks and validates every chunk. A truncated *or* all-NaN chunk raises `DegenerateResponseError` before caching. This is why a **land-only bbox for `obs/ersst-v5`** (an ocean-only SST field) raises — request ocean cells.
+- **General fetch path** (every other product/adapter): the guard is **opt-in**. With the default `degenerate_attempts=1` rosetta does **not** validate — a truncated response can still poison the cache. Pass `degenerate_attempts>1` on a fetch you don't trust to turn on validation (cache-miss responses validated before caching, cache hits re-validated to catch pre-existing poison) plus that many cache-bypass retries.
+- **CCSR NMME** models use a related mechanism: entries with `single_year_fetch: true` chunk per year because the full-range request overflows the CCSR server and silently zero-fills.
+
+If you suspect a poisoned entry from before you enabled the guard, purge it with `rosetta cache clear --product X` and re-fetch with `degenerate_attempts>1`. Independent of the guard, sanity-check any large remote pull (non-zero variance, expected land/ocean mask) before trusting it.
 
 ## Cache issues
 

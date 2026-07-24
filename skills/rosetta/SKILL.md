@@ -1,6 +1,6 @@
 ---
 name: rosetta
-description: Fetch and normalize seasonal/sub-seasonal climate data (NMME, C3S/Copernicus, ERA5, CHIRPS, IMERG, S2S) into canonical CF-aligned xarray Datasets using the accord-rosetta Python package. Use when fetching climate model hindcasts/forecasts or observations, assembling multi-model ensembles, clipping to regions/shapefiles, regridding, plotting quick-look maps of fetched fields, managing the rosetta cache, or debugging CDS/ECDS/IRI credentials and product errors.
+description: Fetch and normalize seasonal/sub-seasonal climate data (NMME, C3S/Copernicus, ERA5, CHIRPS, CHIRPS-GEFS, ERSST, CMAP, TAMSAT, IMERG, S2S) into canonical CF-aligned xarray Datasets using the accord-rosetta Python package. Use when fetching climate model hindcasts/forecasts or observations, fetching issuance-keyed short-range forecasts (CHIRPS-GEFS), building an observed field (e.g. ERSST SST) as a CCA predictor track, assembling multi-model ensembles, reducing a gridded field to one value per district/region (zonal aggregation), clipping to regions/shapefiles, regridding, plotting quick-look maps, managing the rosetta cache, or debugging CDS/ECDS/IRI credentials and product errors.
 license: MIT
 metadata:
   author: accord-research
@@ -59,6 +59,9 @@ catalog.info("nmme/cfsv2")   # full config: variables, grid, streams, adapter
 - `grid_res=1.0` or `regrid_to=some_da`: regrid (mutually exclusive; `grid_res` requires `region`).
 - `boundary`: `"center"` (default) or `"cover"` (keep every cell the region touches).
 - `cache=True` (default): nuthatch-backed local cache; `cache=False` bypasses it.
+- `months=[6,7,8,9]`: restrict an **observational** fetch to those calendar months (rejected with `init`); for one-file-per-(year,month) HTTP products it prunes the download, not just the result.
+- `degenerate_attempts=1` (default): the zero-fill/truncation guard on the general path is **opt-in** — pass `>1` to validate + retry a fetch you don't trust. OPeNDAP-obs products (`obs/ersst-v5`, `obs/cmap`) validate always. Do not assume universal protection.
+- `init=[...]`: a **sequence** of `"YYYY-MM-DD"` dates — only for issuance-keyed products (CHIRPS-GEFS); stacks on `init_time`.
 
 ## Multi-model assembly (feeding deepscale)
 
@@ -91,6 +94,52 @@ for label, product, hind in [("CanSIPS", "nmme/cansipsic4", (1993, 2016)), ...]:
     models[label] = (hc, fc)
 ```
 
+## Observed field as a predictor track
+
+`obs_predictor()` is the observations counterpart of `assemble()`: it turns an observed gridded field (e.g. ERSST SST) into a CCA predictor, returning the same canonical `(year, member, lat, lon)` `(hindcast, forecast)` pair a model would — so an observed predictor drops into deepscale's `predictor_tracks` like a model.
+
+```python
+from rosetta import obs_predictor
+
+hcst, fcst = obs_predictor("obs/ersst-v5", "sst",
+                           months=[6],              # single-month June predictor
+                           hindcast=(1991, 2020), forecast_year=2026,
+                           region=[-40, 40, -60, 60])
+```
+
+Requires exactly one of `target` (a 3-month season) or `months` (explicit calendar months). Full signature: [references/api.md](references/api.md).
+
+## Zonal reduction — one value per region
+
+`fetch(region=...)` dissolves a shapefile's features into a single mask ("data over this area"). Reporting asks the other question — "one number *per* district" — answered by `zonal()`, which rasterizes all N geometries once and reduces with a single groupby (needs the `geo` extra):
+
+```python
+import geopandas as gpd
+from rosetta import fetch, zonal
+
+woredas = gpd.read_file("woredas.shp")
+rain = fetch("obs/chirps-v3-dekad-tif", "precip", region="woredas.shp")
+
+# one series per district; index by a UNIQUE id, carry the (repeatable) name as a label
+per_district = zonal(rain, woredas, by="shapeID", label="ADM3_EN")  # (time, region)
+```
+
+`stat` ∈ mean/sum/min/max/median/std/count; `weights` defaults to `"area"` (= `cos(lat)`; only mean/sum use it). Output mirrors input geometry order/count (empty regions → NaN, 0 for count). Gotchas: on a coarse grid a sub-cell polygon gets NaN, and `all_touched=True` can make coverage *worse* (boundary contention); admin names are often non-unique — index `by` a unique id, carry the name via `label`. Full reference: [references/api.md](references/api.md).
+
+## Issuance-keyed short-range forecasts (CHIRPS-GEFS)
+
+Products with an `issuance` catalog block are keyed by issuance date, not season. Pass `init="YYYY-MM-DD"` or a sequence of dates:
+
+```python
+# same 30-Jun issuance across the reforecast era, stacked on init_time
+gefs = fetch("chc/chirps-gefs-daily", "precip",
+             init=[f"{y}-06-30" for y in range(2001, 2020)],
+             region="ethiopia.shp")
+# -> (init_time, lead_time, member?, lat, lon); lead_time in days, plus a valid_time coord
+```
+
+Output carries `init_time`/`lead_time`/`valid_time` (for `chc/chirps-gefs-15day`, `valid_time` is the window START). A season `target` cannot combine with a sequence. See [references/data-conventions.md](references/data-conventions.md).
+
 ## Regions
 
 Three forms (see [references/api.md](references/api.md) for details):
@@ -112,6 +161,16 @@ ds = fetch("nmme/cfsv2", "precip", init="2024-02", target="MAM", region=kenya)
 ```
 
 The repo ships `fetch_country_shapefiles.py` under its `scripts/` directory, which does the same thing and writes `.shp` files, if you have the checkout and want them on disk. Polygons crossing the antimeridian are not handled — split them first. Requesting a `region` on a non-gridded product raises `ValueError`.
+
+## Notable products by family (full list: [references/products.md](references/products.md))
+
+- **NMME seasonal** (`nmme/*`, no creds) — CFSv2, CCSM4, CESM1, GEOSS2S, SPEAR, CanSIPS. `single_year_fetch` on CCSM4/CESM1/GEOSS2S/SPEAR chunks per year (full-range CCSR requests silently zero-fill).
+- **C3S seasonal** (`c3s/*`, CDS creds) and **S2S** (`c3s/ecmwf-s2s`, ECDS creds).
+- **Reanalysis** (`obs/era5`, `obs/era5-land-monthly`, CDS creds).
+- **NOAA PSL OPeNDAP obs** (no creds) — `obs/ersst-v5` (2° monthly SST, ~1954-present) and `obs/cmap` (2.5° monthly precip, ~1979-present). Chunked (`max_request_years`) with the always-on truncation guard.
+- **CHIRPS** (CHC/UCSB, rate-limited; also Rhiza/Sheerwater mirrors) — monthly/pentad/dekad/annual, plus new `obs/chirps-v3-dekad-tif` (final) and `obs/chirps-v3-dekad-prelim` (near-real-time tail).
+- **CHIRPS-GEFS short-range forecasts** (issuance-keyed, no creds) — `chc/chirps-gefs-daily` (16 daily leads; hindcast 2001-2019, forecast 2021-present, 2020 absent) and `chc/chirps-gefs-15day` (single 15-day accumulation).
+- **TAMSAT** (`obs/tamsat`, JASMIN public, no creds) — 0.0375° monthly precip, kept in `mm/month`, Africa land-only.
 
 ## Caching
 
@@ -152,12 +211,14 @@ check_product("obs/era5", probe_remote=True) # also pings the live source
 - [examples/basic_fetch.py](examples/basic_fetch.py) — obs + hindcast fetch, save to NetCDF/GeoTIFF
 - [examples/multi_model_assemble.py](examples/multi_model_assemble.py) — `assemble()` roster → deepscale-ready arrays
 - [examples/shapefile_region.py](examples/shapefile_region.py) — country clipping, center vs cover
+- [examples/zonal_districts.py](examples/zonal_districts.py) — `zonal()` one-value-per-district reduction
+- [examples/chirps_gefs_issuance.py](examples/chirps_gefs_issuance.py) — issuance-keyed CHIRPS-GEFS (single + sequence)
 - [examples/s2s_fetch.py](examples/s2s_fetch.py) — sub-seasonal issuance + on-the-fly reforecasts
 - [examples/quick_look.py](examples/quick_look.py) — cartopy map, ensemble facets, weighted time series
 
 ## Reference files
 
-- [references/api.md](references/api.md) — complete API: `fetch`, `assemble`, `parse_target`/`parse_init`, `catalog`, health, `validate`, `storage`, CLI
+- [references/api.md](references/api.md) — complete API: `fetch` (incl. `months`, `degenerate_attempts`, `init` sequence), `zonal`, `assemble`, `obs_predictor`, `parse_target`/`parse_init`, `catalog`, health, `validate`, `storage`, CLI
 - [references/products.md](references/products.md) — every product id with adapter, variables, resolution, credentials
 - [references/data-conventions.md](references/data-conventions.md) — the normalization pipeline step by step, unit conversion table, season strings
 - [references/plotting.md](references/plotting.md) — visualizing fetched data: quick-look maps (cartopy), colormap/units conventions, ensemble facets, area-weighted time series, region overlays

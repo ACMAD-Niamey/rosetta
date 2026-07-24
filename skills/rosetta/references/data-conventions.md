@@ -52,6 +52,26 @@ At an operational lead (e.g. 2 months: MAM initialized in January), early-year t
 - **Rectangular multi-season cubes:** when stacking several seasons into one `(season, year, ...)` cube (e.g. for deepscale's `seasonal_coefficients`), *intersect* the years available across all seasons rather than union them — wraparound seasons otherwise NaN-pad the cube.
 - The `init_time → year` rename is what `year_index=True` does for you; for obs use `seasonal="mean"` (which yields a `year` dim directly). Prefer these over hand-rolled `.dt.year` renames.
 
+## Issuance-keyed forecasts (`init_time` / `lead_time` / `valid_time`)
+
+Short-range products with an `issuance` catalog block (CHIRPS-GEFS: `chc/chirps-gefs-daily`, `chc/chirps-gefs-15day`) are addressed by issuance date, not by season. Fetch them with `init="YYYY-MM-DD"` (one issuance) or a **sequence** of `YYYY-MM-DD` dates — the hindcast-skill case, where you want the same calendar issuance across many years. A sequence stacks the result on `init_time`.
+
+Output layout:
+
+- `init_time` — the issuance date(s) (`datetime64`).
+- `lead_time` — numeric lead in the product's `lead_units` (days for CHIRPS-GEFS). `chc/chirps-gefs-daily` carries 16 daily leads (0-15, where lead 0 is the issuance day); `chc/chirps-gefs-15day` carries a single lead (the 15-day accumulation window).
+- `valid_time` — the target date each `(init_time, lead_time)` pair verifies against. **For `chc/chirps-gefs-15day`, `valid_time` marks the window's START** ([init, init+15d)), not its end.
+
+A season `target` cannot combine with an issuance sequence (target selects leads relative to one init); fetch the leads and select the target window afterwards. A sequence passed to a non-issuance product raises `ValueError`.
+
+## Longitude-convention helpers (`normalize.py`, `fetch.py`)
+
+The 0-360 vs -180..180 longitude footgun is now handled by named helpers rather than ad-hoc slicing:
+
+- `normalize.select_lon(ds, lon_w, lon_e, lon_name="lon")` — convention-aware longitude subselection. Short-circuits to "return everything" on a full-globe request (span ≥ 359°), translates the requested bounds into the source's convention, and handles a seam-crossing box (west > east after translation) by selecting both sides and concatenating. Shared by the OPeNDAP adapter (pre-normalize, dim may be `X`) and `normalize` (dim `lon`), because the source convention is only known once the data is opened.
+- `fetch._match_lon_convention(obj, target_lons)` — used by regrid/interp (`grid_res`/`regrid_to`): rolls the source's longitude into the target grid's convention (and re-sorts) before `.interp`, so interpolating a 0-360 source onto a grid with negative longitudes doesn't silently NaN the western band.
+- `normalize.sanitize_for_netcdf(ds)` — rebuilds a dataset from fresh arrays (dropping CF bounds vars and stale inherited encoding) so OPeNDAP/CF results round-trip through `to_netcdf` instead of raising `NetCDF: String match to name in use`. Applied to every `fetch` result.
+
 ## Downstream contract (deepscale)
 
 Deepscale consumes `(year, member, lat, lon)` hindcasts and `(member, lat, lon)` forecasts and calls `hindcast.mean("member")` — which is why `assemble()` guarantees a `member` dim (size 1 if the source has none) and transposes to `(year, member, lat, lon)`. Observations feed deepscale as `(year, lat, lon)` — get there with `fetch(..., seasonal="mean", target=...)` (obs) or `year_index=True` (forecasts).

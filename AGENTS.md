@@ -13,8 +13,13 @@ The skill is a snapshot of the source. Any change that alters observable behavio
 | If you change... | You must update... |
 |---|---|
 | `fetch()` / `assemble()` signatures, defaults, or behavior | `skills/rosetta/SKILL.md` + `skills/rosetta/references/api.md` |
-| `catalog.yaml` (add/remove/deprecate products, variables, adapters) | `skills/rosetta/references/products.md` |
-| `normalize.py` (renames, unit conversions, pipeline order) | `skills/rosetta/references/data-conventions.md` (+ `plotting.md` if dims/units/orientation guarantees change) |
+| `fetch()` params `months`, `degenerate_attempts`, `init` sequence / issuance handling | `skills/rosetta/references/api.md` (params) + `data-conventions.md` (issuance `init_time`/`lead_time`/`valid_time`) + `SKILL.md` |
+| `zonal.py` (`rosetta.zonal` signature, stats, weights, gotchas) | `skills/rosetta/references/api.md` + `SKILL.md` (+ `examples/zonal_districts.py`) |
+| `assemble.py` `obs_predictor` (obs-as-predictor signature/behavior) | `skills/rosetta/references/api.md` + `SKILL.md` |
+| `catalog.yaml` (add/remove/deprecate products, variables, adapters) | `skills/rosetta/references/products.md` (+ `SKILL.md` product families if a new family) |
+| Issuance-keyed catalog entries (CHIRPS-GEFS) or OPeNDAP obs entries (ERSST/CMAP, `max_request_years`) | `skills/rosetta/references/products.md` + `data-conventions.md` (issuance layout) + `troubleshooting.md` (truncation guard) + `examples/chirps_gefs_issuance.py` |
+| `normalize.py` (renames, unit conversions, pipeline order, `select_lon`/`sanitize_for_netcdf`) | `skills/rosetta/references/data-conventions.md` (+ `plotting.md` if dims/units/orientation guarantees change) |
+| Degenerate-response guard (`_robust.reject_if_degenerate`, `DegenerateResponseError`, opt-in vs always-on) | `skills/rosetta/references/troubleshooting.md` + `api.md` (`degenerate_attempts`) |
 | Caching (`_CACHE_VERSION`, cache keys, env vars, nuthatch config) | `skills/rosetta/references/troubleshooting.md` |
 | Credentials/adapters (new source, auth flow, rate limits) | `skills/rosetta/references/products.md` + `troubleshooting.md` |
 | Anything user-facing | `README.md` if it covers the topic |
