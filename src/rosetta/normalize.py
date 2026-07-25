@@ -57,21 +57,27 @@ def _decode_numeric_times(ds):
                 or np.issubdtype(vals.dtype, np.integer)):
             continue
 
+        # ns precision at the source for all three branches below: pandas'
+        # inferred resolution for pd.to_datetime/pd.Timestamp arithmetic is not
+        # guaranteed to be ns (it picks the coarsest resolution that losslessly
+        # fits the values), and each `dates` here becomes a coordinate via
+        # assign_coords — non-ns there triggers xarray's non-nanosecond
+        # UserWarning.
         if "months since" in units:
             years, months = decode_months_since(units, vals)
             dates = pd.to_datetime([
                 f"{y}-{m:02d}-01" for y, m in zip(years, months)
-            ])
+            ]).values.astype("datetime64[ns]")
             ds = ds.assign_coords({coord: dates})
         elif "days since" in units:
             ref_str = units.split("days since")[1].strip()
             ref = pd.Timestamp(ref_str)
-            dates = ref + pd.to_timedelta(vals, unit="D")
+            dates = (ref + pd.to_timedelta(vals, unit="D")).values.astype("datetime64[ns]")
             ds = ds.assign_coords({coord: dates})
         elif "hours since" in units:
             ref_str = units.split("hours since")[1].strip()
             ref = pd.Timestamp(ref_str)
-            dates = ref + pd.to_timedelta(vals, unit="h")
+            dates = (ref + pd.to_timedelta(vals, unit="h")).values.astype("datetime64[ns]")
             ds = ds.assign_coords({coord: dates})
 
     return ds

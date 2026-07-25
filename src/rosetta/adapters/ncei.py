@@ -143,7 +143,13 @@ class NCEIAdapter(AdapterBase):
                         ds = ds.rename(rename_dims)
                         # Assign coordinates from init date and known grid
                         init_date = pd.Timestamp(f"{t['init_year']}-{t['init_month']:02d}-01")
-                        times = pd.date_range(init_date, periods=ds.sizes["time"], freq="D")
+                        # ns precision at the source: pd.date_range's inferred
+                        # resolution isn't guaranteed to be ns (pandas picks the
+                        # coarsest resolution that fits), and this becomes a
+                        # coordinate via assign_coords below.
+                        times = pd.date_range(
+                            init_date, periods=ds.sizes["time"], freq="D"
+                        ).values.astype("datetime64[ns]")
                         lats = np.linspace(-90, 90, ds.sizes["lat"])
                         lons = np.linspace(0, 359, ds.sizes["lon"])
                         ds = ds.assign_coords(time=times, lat=lats, lon=lons)
@@ -159,10 +165,17 @@ class NCEIAdapter(AdapterBase):
                         year_offset = t["init_year"] - times[0].year
                         if year_offset != 0:
                             corrected = times + pd.DateOffset(years=year_offset)
-                            ds = ds.assign_coords({time_dim: corrected.values})
+                            # ns precision at the source: same rationale as above.
+                            ds = ds.assign_coords(
+                                {time_dim: corrected.values.astype("datetime64[ns]")}
+                            )
 
-                    # Add init_time coordinate
-                    init_time = np.datetime64(f"{t['init_year']}-{t['init_month']:02d}-01")
+                    # Add init_time coordinate. ns precision at the source: a bare
+                    # "YYYY-MM-DD" string resolves to day precision, and
+                    # expand_dims below makes this a coordinate.
+                    init_time = np.datetime64(
+                        f"{t['init_year']}-{t['init_month']:02d}-01", "ns"
+                    )
                     ds = ds.expand_dims({"init_time": [init_time]})
 
                     # Add member coordinate

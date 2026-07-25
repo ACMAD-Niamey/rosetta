@@ -53,12 +53,16 @@ def _decode_time_since(units: str, vals) -> np.ndarray:
     unit = m.group(1).lower().rstrip("s")
     y, mo, d = (int(g) for g in m.groups()[1:])
     vals = np.asarray(vals)
+    # Return nanosecond precision: xarray/pandas warn when non-nanosecond
+    # datetime64 values reach a DataArray/Variable constructor (e.g. via
+    # assign_coords), so normalize here at the source rather than spamming a
+    # UserWarning on every dataset open.
     if unit == "month":
         ref = np.datetime64(f"{y:04d}-{mo:02d}", "M")
-        return ref + vals.astype("timedelta64[M]")
+        return (ref + vals.astype("timedelta64[M]")).astype("datetime64[ns]")
     code = _UNIT_CODE[unit]
     ref = np.datetime64(f"{y:04d}-{mo:02d}-{d:02d}", code)
-    return ref + vals.astype("timedelta64[" + code + "]")
+    return (ref + vals.astype("timedelta64[" + code + "]")).astype("datetime64[ns]")
 
 
 def _months_of(dt64: np.ndarray) -> np.ndarray:
@@ -87,6 +91,11 @@ class CCSRAdapter(AdapterBase):
         base = product_config["source_url"].rstrip("/")
         if product_config.get("single_year_fetch") and date_range:
             y0, y1 = date_range
+            # single_year_fetch opens one stream per year (a full-range DAP
+            # request overflows the CCSR server and silently zero-fills), so
+            # log the range once rather than one line per year.
+            if verbose:
+                print(f"[rosetta:ccsr] opening {y1 - y0 + 1} yearly streams for {y0}-{y1}: {base}")
             pieces = []
             for year in range(y0, y1 + 1):
                 # Route each year independently: with single_year_fetch we open
@@ -94,8 +103,6 @@ class CCSRAdapter(AdapterBase):
                 # boundary-spanning range otherwise sends every year to the
                 # date_range[0] stream and silently drops the other side).
                 url = self._stream_url(base, native, product_config, (year, year))
-                if verbose:
-                    print(f"[rosetta:ccsr] opening remote dataset: {url}")
                 ds_y = _with_retry(
                     lambda url=url: xr.open_dataset(url, engine="netcdf4", decode_times=False),
                     max_retries, retry_backoff,

@@ -117,7 +117,11 @@ class S3Adapter(AdapterBase):
                         ref_total = 1960 * 12
                         total = ref_total + int(round(s_val))
                         year, month = total // 12, total % 12 + 1
-                        init_dt = np.datetime64(f"{year}-{month:02d}-01")
+                        # ns precision at the source: a bare "YYYY-MM-DD" string
+                        # resolves to day precision, and expand_dims below makes
+                        # this a coordinate — non-ns there triggers xarray's
+                        # non-nanosecond UserWarning.
+                        init_dt = np.datetime64(f"{year}-{month:02d}-01", "ns")
                         ds = ds.drop_vars(s_coord)
                         ds = ds.expand_dims({"init_time": [init_dt]})
 
