@@ -110,19 +110,22 @@ nmme/ccsm4:
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CCSM4"
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -141,19 +144,22 @@ nmme/cesm1:
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CESM1"
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -171,19 +177,22 @@ nmme/geoss2s:
   split_streams: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1376,7 +1385,7 @@ nmme/spear:
   single_year_fetch: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
       # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
@@ -1384,15 +1393,18 @@ nmme/spear:
       units: "mm"
       target_units: "mm"
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1416,8 +1428,10 @@ nmme/spearb:
   split_streams: true
   variables:
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1443,7 +1457,10 @@ nmme/cansipsic4:
   single_year_fetch: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
+      # CanSIPS-IC4's URL path segment did not rename with the variable:
+      # the server still serves .../prcp, but the variable inside is pr.
+      path_name: prcp
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
       # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
@@ -1451,15 +1468,18 @@ nmme/cansipsic4:
       units: "mm"
       target_units: "mm"
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
