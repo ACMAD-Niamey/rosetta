@@ -19,6 +19,14 @@ filters by year + init month, selects + averages the leads whose target month
 falls in the requested season, wraps longitude to [-180, 180], crops to the
 region, and hands ``S/M/Y/X`` to the normalize layer (which renames them to
 ``init_time/member/lat/lon`` and the native var to the canonical name).
+
+In July 2026 CCSR renamed its datasets to CMIP-style variables (``pr``,
+``tas``, ``tos``; SST also switched from Kelvin to Celsius). For most models
+the URL path segment and the variable inside the dataset renamed together, but
+not for all: CanSIPS-IC4 still serves precipitation at ``.../prcp`` while the
+variable inside is ``pr``. ``native_name`` names the variable *inside* the
+dataset (what normalize renames); an optional per-variable ``path_name`` names
+the URL segment when the two diverge.
 """
 import re
 
@@ -81,6 +89,9 @@ class CCSRAdapter(AdapterBase):
     def fetch_data(self, product_config, variable, date_range=None, region=None):
         var_cfg = product_config["variables"][variable]
         native = var_cfg["native_name"]
+        # URL path segment; equals the variable name except where the server's
+        # rename left them diverged (see module docstring).
+        path_var = var_cfg.get("path_name", native)
         verbose = product_config.get("_verbose", True)
         max_retries = int(product_config.get("_max_retries", _DEFAULT_MAX_RETRIES))
         retry_backoff = float(product_config.get("_retry_backoff", _DEFAULT_RETRY_BACKOFF))
@@ -93,7 +104,7 @@ class CCSRAdapter(AdapterBase):
                 # one stream per year, so the subdir must be chosen per year (a
                 # boundary-spanning range otherwise sends every year to the
                 # date_range[0] stream and silently drops the other side).
-                url = self._stream_url(base, native, product_config, (year, year))
+                url = self._stream_url(base, path_var, product_config, (year, year))
                 if verbose:
                     print(f"[rosetta:ccsr] opening remote dataset: {url}")
                 ds_y = _with_retry(
@@ -108,7 +119,7 @@ class CCSRAdapter(AdapterBase):
             if not pieces:
                 raise ValueError(f"single_year_fetch: no data for {y0}-{y1}")
             return xr.concat(pieces, dim="S")
-        url = self._stream_url(base, native, product_config, date_range)
+        url = self._stream_url(base, path_var, product_config, date_range)
         if verbose:
             print(f"[rosetta:ccsr] opening remote dataset: {url}")
         ds = _with_retry(
@@ -119,7 +130,7 @@ class CCSRAdapter(AdapterBase):
         return self._process(ds, native, product_config, date_range, region)
 
     @staticmethod
-    def _stream_url(base, native, product_config, date_range):
+    def _stream_url(base, path_var, product_config, date_range):
         """Build the variable URL, routing split_streams models to the forecast/
         or hindcast/ subdir from the requested years.
 
@@ -132,7 +143,7 @@ class CCSRAdapter(AdapterBase):
             hr = (product_config.get("grid") or {}).get("hindcast_range")
             is_forecast = bool(date_range and hr and date_range[0] > hr[1])
             base = f"{base}/{'forecast' if is_forecast else 'hindcast'}"
-        return f"{base}/{native}"
+        return f"{base}/{path_var}"
 
     def _process(self, ds, native, config, date_range=None, region=None):
         # ---- decode S (time since 1960) and filter by year + init month ----
@@ -195,9 +206,12 @@ class CCSRAdapter(AdapterBase):
                     "message": "CCSR adapter config is valid.",
                     "probe_remote": False}
         try:
-            native = next(iter(product_config["variables"].values()))["native_name"]
-            ds = xr.open_dataset(url.rstrip("/") + f"/{native}",
-                                 engine="netcdf4", decode_times=False)
+            probe_cfg = next(iter(product_config["variables"].values()))
+            probe_var = probe_cfg.get("path_name", probe_cfg["native_name"])
+            # Route through _stream_url so split-stream models probe an actual
+            # dataset (hindcast/) rather than the bare model directory.
+            probe_url = self._stream_url(url.rstrip("/"), probe_var, product_config, None)
+            ds = xr.open_dataset(probe_url, engine="netcdf4", decode_times=False)
             ds.close()
             return {"healthy": True, "kind": "remote",
                     "message": "CCSR OPeNDAP dataset opened successfully.",

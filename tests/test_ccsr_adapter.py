@@ -277,10 +277,11 @@ def test_ccsr_forecast_paths_reachable(product):
     ["nmme/ccsm4", "nmme/cesm1", "nmme/geoss2s", "nmme/spear", "nmme/cansipsic4"],
 )
 def test_ccsr_temp_units_celsius_not_double_converted(product):
-    """Regression (temp units bug): CCSR serves NMME 2 m temperature already in
-    Celsius, with no units attribute. The catalog must declare units=C so
-    normalize() does not subtract 273.15 a second time and produce
-    sub-absolute-zero values (the bug produced mean ~ -280 C for physical ~ -7 C).
+    """Regression (temp units bug): CCSR serves NMME 2 m temperature in Celsius
+    (variable renamed t2m -> tas in the 2026-07 CMIP renaming). The catalog must
+    declare units=C so normalize() does not subtract 273.15 a second time and
+    produce sub-absolute-zero values (the bug produced mean ~ -280 C for
+    physical ~ -7 C).
     """
     from rosetta import catalog
     from rosetta.normalize import normalize
@@ -289,7 +290,7 @@ def test_ccsr_temp_units_celsius_not_double_converted(product):
     assert cfg["adapter"] == "ccsr"
     # A raw CCSR temp field: physical Celsius values, no units attribute.
     raw = xr.Dataset(
-        {"t2m": (("lat", "lon"), np.array([[-7.0, -5.0], [0.0, 3.0]], dtype=float))},
+        {"tas": (("lat", "lon"), np.array([[-7.0, -5.0], [0.0, 3.0]], dtype=float))},
         coords={"lat": [54.0, 55.0], "lon": [-106.0, -105.0]},
     )
     out = normalize(raw, cfg, "temp")
