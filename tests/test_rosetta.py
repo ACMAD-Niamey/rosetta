@@ -810,11 +810,17 @@ def test_c3s_entries_have_sst():
         assert sst["target_units"] == "K"
 
 def test_ncei_entries_have_sst():
+    # These CCSR-served products renamed sst -> tos in the server's July 2026
+    # CMIP renaming (and switched to Celsius); the delivered contract stays K
+    # via normalize's (C, K) conversion.
     from rosetta import catalog
     for product in ["nmme/ccsm4", "nmme/geoss2s"]:
         cfg = catalog.info(product)
         assert "sst" in cfg["variables"], f"{product} is missing sst variable block"
-        assert cfg["variables"]["sst"]["native_name"] == "sst"
+        sst = cfg["variables"]["sst"]
+        assert sst["native_name"] == "tos"
+        assert sst["units"] == "C"
+        assert sst["target_units"] == "K"
 
 def test_normalize_sst_preserves_nan():
     import numpy as np
