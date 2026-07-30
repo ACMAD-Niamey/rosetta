@@ -180,6 +180,21 @@ class OPeNDAPAdapter(AdapterBase):
                 if verbose:
                     n = int(mask.sum())
                     print(f"[rosetta:opendap] filtered S to {n} init times")
+        # IRIDL observational monthly axis: T is "months since YYYY-MM-DD" (a
+        # non-CF encoding xarray cannot decode, same as NMME's S). Decode it to
+        # real monthly timestamps and expose as `time`, so the year-slice /
+        # chunk-load / seasonal-mean path below treats it exactly like a PSL
+        # "days since" obs source. Mirrors the S handling above.
+        if "T" in ds.coords and "S" not in ds.coords:
+            t_units = ds["T"].attrs.get("units", "")
+            if "months since" in t_units:
+                t_years, t_months = decode_months_since(t_units, ds["T"].values)
+                times = np.array([np.datetime64(f"{y:04d}-{m:02d}")
+                                  for y, m in zip(t_years, t_months)])
+                ds = ds.rename({"T": "time"}).assign_coords(time=times)
+                if verbose:
+                    print(f"[rosetta:opendap] decoded IRIDL T ('months since') "
+                          f"to {len(times)} monthly timestamps")
         # An observational time axis is chunk-loaded after the region slice, so
         # each DAP request carries only the cells the caller asked for.
         obs_years = None

@@ -1548,3 +1548,35 @@ obs/cmap:
     hindcast_range: [1979, 2026]
     temporal: monthly
   notes: "CPC CMAP standard (gauge+satellite) monthly precip, 2.5deg. NOAA PSL, no IRIDL. CAMS-OPI-lineage predictand."
+
+# CAMS-OPI v0208 — ACMAD's actual OPERATIONAL predictand (their obs updater pulls
+# exactly this from IRIDL: SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208/.mean/.prcp).
+# Native 2.5deg global monthly, mm/day, IRIDL "months since 1960" T axis (decoded
+# by the opendap adapter's obs T-handling). Use this to match ACMAD's forecast;
+# obs/cmap is the IRIDL-free CAMS-OPI-lineage substitute. Coarsen/interp with
+# grid_res=/regrid_to= for the CCA grid. Season selection downstream via seasonal=.
+obs/cams-opi:
+  adapter: opendap
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.NOAA/.NCEP/.CPC/.CAMS_OPI/.v0208/.mean"
+  # opendap default url_template appends /.{native_name}/dods -> .../.mean/.prcp/dods
+  decode_times: false      # IRIDL "months since 1960-01-01" (calendar 360) — decoded in-adapter
+  max_request_years: 5
+  variables:
+    precip:
+      native_name: prcp
+      units: "mm/day"
+      target_units: "mm/day"
+      fill_value: -999.0
+  grid:
+    lat_res: 2.5
+    lon_res: 2.5
+    hindcast_range: [1979, 2026]
+    temporal: monthly
+  notes: >-
+    CPC CAMS-OPI v0208 monthly merged precip, 2.5deg, IRIDL. ACMAD's operational
+    predictand (mm/day; ACMAD sums to a seasonal mm-total, a CCA-invariant scale).
+    Validated against ACMAD's own camsopi CPT predictand: single-year ASO spatial
+    patcorr 0.965 and exact x91 seasonal-total factor (same product); rainy-region
+    interannual-anomaly corr 0.833 vs 0.734 for the obs/cmap substitute. The residual
+    from 1.0 is the regrid method (ACMAD uses IRIDL server-side area-weighted GRID
+    2.5->0.5deg; rosetta linear-interps via grid_res=/regrid_to=).
