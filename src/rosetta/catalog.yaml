@@ -1492,6 +1492,46 @@ nmme/cansipsic4:
 nmme/cansipsic4-hindcast:
   alias_of: "nmme/cansipsic4"   # deprecated: hindcast is the same product, hindcast stream
 
+# CanCM3 / CanCM4 — ACMAD's `cmc1` / `cmc2`. The legacy CCCma models (CanSIPS-IC3
+# components), retired from NMME and archived only on IRIDL. Added to reproduce
+# ACMAD's EXACT operational roster (cfsv2, cmc1=CanCM3, cmc2=CanCM4, nasa, ncar);
+# CanSIPS-IC4 (above) is the modern successor. Split HINDCAST/FORECAST, both 10
+# members (clean append, unlike GEOSS2S's 4-vs-10); IRIDL "months since 1960" S.
+# SST Kelvin -> Celsius; precip is a monthly TOTAL (mm/month), CCA-invariant.
+nmme/cancm3:
+  adapter: opendap
+  split_streams: true
+  append_streams: true
+  single_year_fetch: true
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.CMC1-CanCM3/.{stream}/.MONTHLY"
+  variables:
+    precip: {native_name: prec, short_name: pr, units: "mm/day", target_units: "mm/day"}
+    sst:    {native_name: sst,  units: K, target_units: C}
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    forecast_members: 10
+    hindcast_members: 10
+    hindcast_range: [1981, 2011]
+    forecast_range: [2011, null]
+
+nmme/cancm4:
+  adapter: opendap
+  split_streams: true
+  append_streams: true
+  single_year_fetch: true
+  source_url: "https://iridl.ldeo.columbia.edu/SOURCES/.Models/.NMME/.CMC2-CanCM4/.{stream}/.MONTHLY"
+  variables:
+    precip: {native_name: prec, short_name: pr, units: "mm/day", target_units: "mm/day"}
+    sst:    {native_name: sst,  units: K, target_units: C}
+  grid:
+    lat_res: 1.0
+    lon_res: 1.0
+    forecast_members: 10
+    hindcast_members: 10
+    hindcast_range: [1981, 2011]
+    forecast_range: [2011, null]
+
 # ============================================================================
 # ACMAD predictands (added on the `acmad` branch — ACMAD seasonal-forecast
 # replication). Observed rainfall the CPT/CCA outlook is calibrated against, from
