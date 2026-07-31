@@ -876,9 +876,31 @@ obs/chirps-v3-monthly:
   grid:
     lat_res: 0.05
     lon_res: 0.05
-    hindcast_range: [1981, 2025]
+    hindcast_range: [1981, 2026]   # final stream is ~1.5-month-lagged; fetch the current year with allow_partial=True
     temporal: monthly
-  notes: "Native UCSB CHIRPS v3.0 monthly (0.05° COG). Was obs/chirps-direct."
+  notes: "Native UCSB CHIRPS v3.0 monthly (0.05° COG). Final (gauge-corrected) stream; a new month posts by ~the 15th of the following month. For the near-real-time tail use obs/chirps-v3-monthly-prelim. Was obs/chirps-direct."
+
+# Preliminary near-real-time monthly stream (~2-3-week lag), for the current
+# season before the final gauge-corrected monthly catches up. Same grid/format as
+# the final monthly COG/TIF above, different source directory (TIFs, not COGs).
+obs/chirps-v3-monthly-prelim:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/prelim/monthly/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.tif"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/month"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    forecast_range: [2024, null]   # rolling near-real-time feed; not a fixed archive
+    temporal: monthly
+  notes: "CHIRPS v3.0 PRELIMINARY monthly GeoTIFFs (~2-3-week lag). Use for the current season; splice onto obs/chirps-v3-monthly for the completed record."
 
 obs/chirps-v3-daily:
   adapter: http
