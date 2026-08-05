@@ -156,6 +156,14 @@ def _open_raster(url, region, variable=None, fill_value=None):
     return ds
 
 
+def _ns_stamp(value):
+    """Coerce a timestamp to nanosecond-precision datetime64. Building a time
+    coordinate from a coarser resolution makes xarray/pandas emit a
+    non-nanosecond UserWarning; with one raster opened per file, that otherwise
+    floods a multi-file download. Forcing ns here silences it at the source."""
+    return np.datetime64(pd.Timestamp(value), "ns")
+
+
 def _open_cog_subset(url, region, variable=None, fill_value=None, timestamp=None):
     """`_open_raster` plus a time coordinate.
 
@@ -169,14 +177,14 @@ def _open_cog_subset(url, region, variable=None, fill_value=None, timestamp=None
     if "time" in ds.dims:
         return ds
     if timestamp is not None:
-        return ds.expand_dims(time=[pd.Timestamp(timestamp)])
+        return ds.expand_dims(time=[_ns_stamp(timestamp)])
     m = re.search(r'(\d{4})\.(\d{2})', url)
     if m:
-        ds = ds.expand_dims(time=[pd.Timestamp(f"{m.group(1)}-{m.group(2)}-01")])
+        ds = ds.expand_dims(time=[_ns_stamp(f"{m.group(1)}-{m.group(2)}-01")])
     else:
         ym = re.search(r'\.(\d{4})\.(?:cog|tif)$', url)
         if ym:
-            ds = ds.expand_dims(time=[pd.Timestamp(f"{ym.group(1)}-01-01")])
+            ds = ds.expand_dims(time=[_ns_stamp(f"{ym.group(1)}-01-01")])
     return ds
 
 
