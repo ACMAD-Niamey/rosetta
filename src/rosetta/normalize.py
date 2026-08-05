@@ -21,6 +21,9 @@ _COORD_RENAMES = {
 
 _CONVERSIONS = {
     ("K", "C"): lambda da: da - 273.15,
+    # CCSR's 2026-07 CMIP renaming also switched SST from Kelvin to Celsius;
+    # this preserves rosetta's existing "NMME sst in K" contract.
+    ("C", "K"): lambda da: da + 273.15,
     ("kg m-2 s-1", "mm/day"): lambda da: da * 86400,
     ("m s-1", "mm/day"): lambda da: da * 1000 * 86400,
     ("m", "mm/day"): lambda da: da * 1000,

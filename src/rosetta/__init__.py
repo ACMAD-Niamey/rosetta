@@ -38,6 +38,7 @@ _os.environ.setdefault("NUTHATCH_LOCAL_FILESYSTEM", _cache_uri)
 
 from . import catalog
 from .fetch import fetch, parse_target, parse_init
+from .cpc_nmme import cpc_nmme_predictor  # noqa: F401
 from .assemble import assemble, obs_predictor
 from .zonal import zonal
 from .health import check_product, check_all_products

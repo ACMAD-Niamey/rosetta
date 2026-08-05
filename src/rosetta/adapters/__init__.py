@@ -7,6 +7,7 @@ from .ncei import NCEIAdapter
 from .s3 import S3Adapter
 from .sheerwater import SheerwaterAdapter
 from .ccsr import CCSRAdapter
+from .cpc_binary import CPCBinaryAdapter
 # IcechunkAdapter imports the `icechunk` package lazily (inside its methods), so
 # registering it here is safe without that optional dependency installed; a
 # fetch only needs it when an icechunk-backed product is actually used.
@@ -22,6 +23,7 @@ _ADAPTERS = {
     "s3": S3Adapter,
     "sheerwater": SheerwaterAdapter,
     "ccsr": CCSRAdapter,
+    "cpc_binary": CPCBinaryAdapter,
     "icechunk": IcechunkAdapter,
 }
 

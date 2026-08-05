@@ -110,19 +110,22 @@ nmme/ccsm4:
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CCSM4"
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -141,19 +144,22 @@ nmme/cesm1:
   source_url: "https://forecast.ccsr.columbia.edu/data/NMME/COLA-RSMAS/CESM1"
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -171,19 +177,22 @@ nmme/geoss2s:
   split_streams: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       units: mm
       target_units: mm
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -867,9 +876,31 @@ obs/chirps-v3-monthly:
   grid:
     lat_res: 0.05
     lon_res: 0.05
-    hindcast_range: [1981, 2025]
+    hindcast_range: [1981, 2026]   # final stream is ~1.5-month-lagged; fetch the current year with allow_partial=True
     temporal: monthly
-  notes: "Native UCSB CHIRPS v3.0 monthly (0.05° COG). Was obs/chirps-direct."
+  notes: "Native UCSB CHIRPS v3.0 monthly (0.05° COG). Final (gauge-corrected) stream; a new month posts by ~the 15th of the following month. For the near-real-time tail use obs/chirps-v3-monthly-prelim. Was obs/chirps-direct."
+
+# Preliminary near-real-time monthly stream (~2-3-week lag), for the current
+# season before the final gauge-corrected monthly catches up. Same grid/format as
+# the final monthly COG/TIF above, different source directory (TIFs, not COGs).
+obs/chirps-v3-monthly-prelim:
+  adapter: http
+  source_url: "https://data.chc.ucsb.edu/products/CHIRPS/v3.0/prelim/monthly/global/tifs/"
+  file_pattern: "chirps-v3.0.{year}.{month:02d}.tif"
+  format: tif
+  request_interval: 3.0   # TIF range reads; floor keeps bulk pulls under CrowdSec ~2 req/s
+  variables:
+    precip:
+      native_name: precip
+      units: "mm/month"
+      target_units: "mm/day"
+      fill_value: -9999
+  grid:
+    lat_res: 0.05
+    lon_res: 0.05
+    forecast_range: [2024, null]   # rolling near-real-time feed; not a fixed archive
+    temporal: monthly
+  notes: "CHIRPS v3.0 PRELIMINARY monthly GeoTIFFs (~2-3-week lag). Use for the current season; splice onto obs/chirps-v3-monthly for the completed record."
 
 obs/chirps-v3-daily:
   adapter: http
@@ -1376,7 +1407,7 @@ nmme/spear:
   single_year_fetch: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
       # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
@@ -1384,15 +1415,18 @@ nmme/spear:
       units: "mm"
       target_units: "mm"
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1416,8 +1450,10 @@ nmme/spearb:
   split_streams: true
   variables:
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1443,7 +1479,13 @@ nmme/cansipsic4:
   single_year_fetch: true
   variables:
     precip:
-      native_name: prcp
+      native_name: pr
+      # CCSR's CanSIPS paths differ by stream, though both datasets contain pr:
+      # the hindcast remains .../hindcast/prcp while the forecast was renamed
+      # to .../forecast/pr.
+      path_name:
+        hindcast: prcp
+        forecast: pr
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
       # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
@@ -1451,15 +1493,18 @@ nmme/cansipsic4:
       units: "mm"
       target_units: "mm"
     temp:
-      native_name: t2m
-      # CCSR serves NMME 2 m temperature already in Celsius (no units attribute),
+      native_name: tas
+      # CCSR serves NMME 2 m temperature already in Celsius (declared
+      # degree_Celsius since the 2026-07 CMIP rename; previously no units attr),
       # unlike the IRI/CDS sources which serve Kelvin. Declaring K here caused a
       # double K->C conversion in normalize() -> sub-absolute-zero values.
       units: C
       target_units: C
     sst:
-      native_name: sst
-      units: K
+      native_name: tos
+      # The CMIP rename also switched SST from Kelvin to Celsius on the
+      # server; normalize converts back so the delivered contract stays K.
+      units: C
       target_units: K
   grid:
     lat_res: 1.0
@@ -1471,6 +1516,11 @@ nmme/cansipsic4:
 
 nmme/cansipsic4-hindcast:
   alias_of: "nmme/cansipsic4"   # deprecated: hindcast is the same product, hindcast stream
+
+# NB: ACMAD's cmc1/cmc2 (CanCM3/CanCM4) are NOT fetched as raw IRIDL model output — those
+# models are retired and have no current forecast. ACMAD ingests them as CPC's pre-formatted
+# seasonal CPT files, along with the rest of its roster; use `rosetta.cpc_nmme_predictor`
+# (rosetta/cpc_nmme.py) for that native, exact, IRIDL-free source.
 
 # ============================================================================
 # ACMAD predictands (added on the `acmad` branch — ACMAD seasonal-forecast
@@ -1528,3 +1578,43 @@ obs/cmap:
     hindcast_range: [1979, 2026]
     temporal: monthly
   notes: "CPC CMAP standard (gauge+satellite) monthly precip, 2.5deg. NOAA PSL, no IRIDL. CAMS-OPI-lineage predictand."
+
+# CAMS-OPI v0208 — ACMAD's actual OPERATIONAL predictand. Served NATIVELY (no IRIDL)
+# as raw GrADS monthly binaries on CPC's public HTTP/FTP: one file per month, 7
+# float32 big-endian fields on a 2.5deg global grid, UNDEF -999. The merged product
+# is field index 3 ("comb" = blended CAMS+OPI), identical to IRIDL's .v0208/.mean/.prcp.
+# obs/cmap is the alternative CAMS-OPI-lineage product (NOAA PSL). Coarsen/interp with
+# grid_res=/regrid_to= for the CCA grid; season selection downstream via seasonal=.
+obs/cams-opi:
+  adapter: cpc_binary
+  source_url: "https://ftp.cpc.ncep.noaa.gov/precip/data-req/cams_opi_v0208"
+  file_pattern: "cams_opi_merged.{year}{month:02d}"
+  binary:
+    nx: 144
+    ny: 72
+    x0: 1.25        # lon 1.25..358.75 (0..360 convention)
+    dx: 2.5
+    y0: -88.75      # lat -88.75..88.75 (ascending)
+    dy: 2.5
+    n_fields: 7     # cams, camsn, opi, comb, xxxx, comba, gam
+    dtype: ">f4"    # big-endian float32
+    undef: -999.0
+  variables:
+    precip:
+      native_name: prcp
+      field_index: 3     # "comb": blended CAMS+OPI merged precip (mm/day)
+      units: "mm/day"
+      target_units: "mm/day"
+  grid:
+    lat_res: 2.5
+    lon_res: 2.5
+    hindcast_range: [1979, 2026]
+    temporal: monthly
+  notes: >-
+    CPC CAMS-OPI v0208 monthly merged precip (field "comb"), 2.5deg, native CPC
+    FTP/HTTP -- NO IRIDL. ACMAD's operational predictand (mm/day). Validated against
+    ACMAD's own camsopi CPT predictand: single-year ASO spatial patcorr 0.965 (same
+    product); rainy-region interannual-anomaly corr 0.83 vs 0.73 for the obs/cmap
+    alternative. Regrid to the forecast grid is a linear interp (grid_res=/regrid_to=);
+    ACMAD upsamples 2.5->0.5deg server-side (area-weighted), a minor interpolation-path
+    difference.

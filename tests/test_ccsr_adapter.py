@@ -174,6 +174,36 @@ def test_split_streams_routes_to_forecast_or_hindcast(monkeypatch):
     assert captured["url"].endswith("/NOAA-GFDL/SPEAR/forecast/prcp")
 
 
+def test_split_streams_support_stream_specific_variable_paths(monkeypatch):
+    """CanSIPS precipitation uses /hindcast/prcp but /forecast/pr."""
+    from rosetta.adapters import ccsr as ccsr_mod
+    from rosetta.adapters.ccsr import CCSRAdapter
+    captured = {}
+
+    def fake_open(url, **kwargs):
+        captured["url"] = url
+        return _synthetic_ccsr(native="pr")
+
+    monkeypatch.setattr(ccsr_mod.xr, "open_dataset", fake_open)
+    cfg = {
+        "adapter": "ccsr", "split_streams": True,
+        "source_url": "https://x/NMME/ECCC/CanSIPS-IC4",
+        "variables": {
+            "precip": {
+                "native_name": "pr",
+                "path_name": {"hindcast": "prcp", "forecast": "pr"},
+                "units": "mm", "target_units": "mm",
+            }
+        },
+        "grid": {"hindcast_range": [1990, 2024]},
+        "init_months": [9], "_verbose": False,
+    }
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2016, 2016), region=None)
+    assert captured["url"].endswith("/ECCC/CanSIPS-IC4/hindcast/prcp")
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2025, 2025), region=None)
+    assert captured["url"].endswith("/ECCC/CanSIPS-IC4/forecast/pr")
+
+
 def test_combined_stream_has_no_subdir(monkeypatch):
     """Without split_streams (CCSM4), the variable hangs directly off the base url."""
     from rosetta.adapters.ccsr import CCSRAdapter
@@ -277,10 +307,11 @@ def test_ccsr_forecast_paths_reachable(product):
     ["nmme/ccsm4", "nmme/cesm1", "nmme/geoss2s", "nmme/spear", "nmme/cansipsic4"],
 )
 def test_ccsr_temp_units_celsius_not_double_converted(product):
-    """Regression (temp units bug): CCSR serves NMME 2 m temperature already in
-    Celsius, with no units attribute. The catalog must declare units=C so
-    normalize() does not subtract 273.15 a second time and produce
-    sub-absolute-zero values (the bug produced mean ~ -280 C for physical ~ -7 C).
+    """Regression (temp units bug): CCSR serves NMME 2 m temperature in Celsius
+    (variable renamed t2m -> tas in the 2026-07 CMIP renaming). The catalog must
+    declare units=C so normalize() does not subtract 273.15 a second time and
+    produce sub-absolute-zero values (the bug produced mean ~ -280 C for
+    physical ~ -7 C).
     """
     from rosetta import catalog
     from rosetta.normalize import normalize
@@ -289,7 +320,7 @@ def test_ccsr_temp_units_celsius_not_double_converted(product):
     assert cfg["adapter"] == "ccsr"
     # A raw CCSR temp field: physical Celsius values, no units attribute.
     raw = xr.Dataset(
-        {"t2m": (("lat", "lon"), np.array([[-7.0, -5.0], [0.0, 3.0]], dtype=float))},
+        {"tas": (("lat", "lon"), np.array([[-7.0, -5.0], [0.0, 3.0]], dtype=float))},
         coords={"lat": [54.0, 55.0], "lon": [-106.0, -105.0]},
     )
     out = normalize(raw, cfg, "temp")

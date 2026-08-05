@@ -42,14 +42,36 @@ The s3 adapter shells out to the **AWS CLI** (`aws s3 ls/cp`) — configure `aws
 | `DeprecationWarning` on fetch | Product is an alias or date-deprecated — see `catalog.info(p)` for `successor` |
 | 401 / interactive auth prompt / fsspec `Protocol not known` touching `gs://sheerwater-datalake/...` | Ambient nuthatch config shadowing — see below |
 | GRIB decode errors | MARS/S2S need `cfgrib` + `eccodeslib` (installed by default); rosetta uses `decode_timedelta=False` to avoid an xarray non-nanosecond-timedelta assertion |
+| `ERR: DAP DATADDS packet is apparently too short` printed to **stderr** | An OPeNDAP server (seen with NOAA PSL/THREDDS) truncated a large request; netCDF4 then returns a **plausible zero-filled array** — right shape/dtype, wrong data. See the silent-truncation guard section below for what is and isn't caught automatically. |
+| `DegenerateResponseError` | rosetta's guard rejected a bitwise-constant / zero-filled (or, on the OPeNDAP obs path, all-NaN) response before it reached the cache. For OPeNDAP obs (`obs/ersst-v5`, `obs/cmap`) this is always on — commonly it means a truncated chunk, or (for the ocean-only `obs/ersst-v5`) a **land-only bbox** that is legitimately all-NaN (request an ocean-containing region). On the general path it only fires when you passed `degenerate_attempts>1`; rosetta already retried with the cache bypassed, so a persistent error means the source itself is returning bad data. |
+| `AttributeError` on sheerwater's `chirps_raw_live` | Upstream sheerwater removed the near-real-time function; `obs/chirps-live-rhiza` fails until it is restored — for current-season CHIRPS use the native CHC products (subject to their rate limits) |
+| Full CrowdSec 403 on **every** CHC path including the site root | The IP ban is site-wide and time-limited (hours to days) — wait it out; don't retry, it can extend the ban |
+
+## OPeNDAP silent truncation and the degenerate-response guard
+
+A large OPeNDAP request against NOAA PSL / THREDDS can be truncated server-side: netCDF4 prints `ERR: DAP DATADDS packet is apparently too short` to **stderr** and then hands back a **plausible zero-filled array** (right shape and dtype, wrong data) with **no exception**. Left unchecked it reaches the cache and re-serves on retry.
+
+Rosetta now ships a guard (`reject_if_degenerate` / `DegenerateResponseError`) that detects a bitwise-constant, zero-filled, or all-NaN response. **It is not universal — know which path you are on:**
+
+- **OPeNDAP observational chunk path** (`obs/ersst-v5`, `obs/cmap`): the guard is **always on** and strict (`reject_all_nan=True`). Each product declares `max_request_years` (5), so the adapter loads the record in year blocks and validates every chunk. A truncated *or* all-NaN chunk raises `DegenerateResponseError` before caching. This is why a **land-only bbox for `obs/ersst-v5`** (an ocean-only SST field) raises — request ocean cells.
+- **General fetch path** (every other product/adapter): the guard is **opt-in**. With the default `degenerate_attempts=1` rosetta does **not** validate — a truncated response can still poison the cache. Pass `degenerate_attempts>1` on a fetch you don't trust to turn on validation (cache-miss responses validated before caching, cache hits re-validated to catch pre-existing poison) plus that many cache-bypass retries.
+- **CCSR NMME** models use a related mechanism: entries with `single_year_fetch: true` chunk per year because the full-range request overflows the CCSR server and silently zero-fills.
+
+If you suspect a poisoned entry from before you enabled the guard, purge it with `rosetta cache clear --product X` and re-fetch with `degenerate_attempts>1`. Independent of the guard, sanity-check any large remote pull (non-zero variance, expected land/ocean mask) before trusting it.
 
 ## Cache issues
 
 - Cache root: `~/.nuthatch/caches` (override with `ROSETTA_CACHE_DIR` **before importing rosetta**; power users: `NUTHATCH_ROOT_FILESYSTEM` / `NUTHATCH_LOCAL_FILESYSTEM`, which rosetta only `setdefault`s). Scratch downloads: `~/.nuthatch/rosetta/_tmp` (`ROSETTA_TMP_DIR`) — deliberately not the system tempdir, because macOS reaps `/var/folders/.../T/` and breaks pickled lazy datasets.
-- Cache key: `(product, variable, date_range, region-bbox, init_months, init_date)` under namespace `rosetta`, versioned by `_CACHE_VERSION` (currently 5). A version bump invalidates all cached entries. Polygon geometries never enter the key.
+- Cache key: `(product, variable, date_range, region-bbox, init_months, init_date)` under namespace `rosetta`, versioned by `_CACHE_VERSION` (currently 6). A version bump invalidates all cached entries. Polygon geometries never enter the key.
 - `cache=False` bypasses nuthatch entirely (straight to adapter).
 - Inspect / clear: `rosetta cache list`, `rosetta cache clear [--product X] [--yes]` (wraps `python -m nuthatch list/delete --namespace rosetta`).
-- **Sheerwater shadowing gotcha:** when `sheerwater` is co-installed, nuthatch's upward config search can escape `site-packages/rosetta/` and adopt sheerwater's `nuthatch.toml`, which points the cache root at a private GCS bucket (`gs://sheerwater-datalake/...`) → 401s or fsspec crashes for users without those credentials. Rosetta defends twice: it ships a shadow `src/rosetta/nuthatch.toml` (`filesystem = "file://~/.nuthatch/caches"`) and pins the env vars at import. If you still see GCS errors, check for an ambient `~/.nuthatch.toml` or env vars pointing at GCS.
+- **Sheerwater shadowing gotcha:** when `sheerwater` is co-installed, nuthatch's upward config search can escape `site-packages/rosetta/` and adopt sheerwater's `nuthatch.toml`, which points the cache root at a private GCS bucket (`gs://sheerwater-datalake/...`) → 401s or fsspec crashes for users without those credentials. Rosetta defends twice: it ships a shadow `src/rosetta/nuthatch.toml` (`filesystem = "file://~/.nuthatch/caches"`) and pins the env vars at import. If you still see GCS errors, check for an ambient `~/.nuthatch.toml` or env vars pointing at GCS. If nuthatch tries the private bucket first and **prompts interactively** (fatal in scripts/CI), skip it explicitly so reads fall through to the public anonymous mirror:
+
+  ```toml
+  # ~/.nuthatch.toml
+  [tool.nuthatch]
+  skipped_filesystems = ["gs://sheerwater-datalake/caches"]
+  ```
 - Datasets are **eagerly loaded** (`.load()`) before caching on purpose: pickling a lazy dataset stores only a "reopen this temp file" recipe that breaks across sessions.
 
 ## Install notes
