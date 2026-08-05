@@ -174,6 +174,36 @@ def test_split_streams_routes_to_forecast_or_hindcast(monkeypatch):
     assert captured["url"].endswith("/NOAA-GFDL/SPEAR/forecast/prcp")
 
 
+def test_split_streams_support_stream_specific_variable_paths(monkeypatch):
+    """CanSIPS precipitation uses /hindcast/prcp but /forecast/pr."""
+    from rosetta.adapters import ccsr as ccsr_mod
+    from rosetta.adapters.ccsr import CCSRAdapter
+    captured = {}
+
+    def fake_open(url, **kwargs):
+        captured["url"] = url
+        return _synthetic_ccsr(native="pr")
+
+    monkeypatch.setattr(ccsr_mod.xr, "open_dataset", fake_open)
+    cfg = {
+        "adapter": "ccsr", "split_streams": True,
+        "source_url": "https://x/NMME/ECCC/CanSIPS-IC4",
+        "variables": {
+            "precip": {
+                "native_name": "pr",
+                "path_name": {"hindcast": "prcp", "forecast": "pr"},
+                "units": "mm", "target_units": "mm",
+            }
+        },
+        "grid": {"hindcast_range": [1990, 2024]},
+        "init_months": [9], "_verbose": False,
+    }
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2016, 2016), region=None)
+    assert captured["url"].endswith("/ECCC/CanSIPS-IC4/hindcast/prcp")
+    CCSRAdapter().fetch_data(cfg, "precip", date_range=(2025, 2025), region=None)
+    assert captured["url"].endswith("/ECCC/CanSIPS-IC4/forecast/pr")
+
+
 def test_combined_stream_has_no_subdir(monkeypatch):
     """Without split_streams (CCSM4), the variable hangs directly off the base url."""
     from rosetta.adapters.ccsr import CCSRAdapter

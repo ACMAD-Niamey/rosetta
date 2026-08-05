@@ -18,6 +18,8 @@ Deprecated aliases (emit `DeprecationWarning`, resolve to base products): `nmme/
 
 The CCSR adapter also normalizes longitude from 0-360 to [-180, 180]. Entries marked `single_year_fetch: true` (`nmme/ccsm4`, `nmme/cesm1`, `nmme/geoss2s`, `nmme/spear`) issue one DAP request per year: the full-range hindcast request overflows the CCSR server and silently zero-fills, so rosetta chunks it. This is the CCSR analogue of the OPeNDAP `max_request_years` guard (see the NOAA PSL products below).
 
+CanSIPS-IC4 precipitation uses different CCSR dataset paths by stream: `hindcast/prcp` and `forecast/pr` (both contain the native variable `pr`). The catalog records this with a stream-specific `path_name` mapping.
+
 Two practical caveats from operational use:
 
 - **Real-time vs hindcast availability differ per model and drift over time** — a model can have a full 1991-2020 hindcast but publish no current-month forecast (SPEAR in mid-2026), or a hindcast too short for a 30-year baseline (GEOSS2S ends 2017). Probe before committing a roster: `check_product(p, probe_remote=True)` or a cheap single-year fetch of the current init. CFSv2 sometimes returns a single (member-reduced) ensemble member — useless for spread-based calibration.

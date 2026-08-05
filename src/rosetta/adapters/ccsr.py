@@ -23,10 +23,12 @@ region, and hands ``S/M/Y/X`` to the normalize layer (which renames them to
 In July 2026 CCSR renamed its datasets to CMIP-style variables (``pr``,
 ``tas``, ``tos``; SST also switched from Kelvin to Celsius). For most models
 the URL path segment and the variable inside the dataset renamed together, but
-not for all: CanSIPS-IC4 still serves precipitation at ``.../prcp`` while the
-variable inside is ``pr``. ``native_name`` names the variable *inside* the
-dataset (what normalize renames); an optional per-variable ``path_name`` names
-the URL segment when the two diverge.
+not for all: CanSIPS-IC4 serves hindcast precipitation at ``.../prcp`` and
+forecast precipitation at ``.../pr``, while the variable inside both datasets
+is ``pr``. ``native_name`` names the variable *inside* the dataset (what
+normalize renames); an optional per-variable ``path_name`` names the URL
+segment when the two diverge. For split-stream products, ``path_name`` may be a
+``hindcast``/``forecast`` mapping when the provider uses different paths.
 """
 import re
 
@@ -139,10 +141,16 @@ class CCSRAdapter(AdapterBase):
         models, years past hindcast_range[1] are the live forecast, otherwise the
         reforecast.
         """
+        stream = None
         if product_config.get("split_streams"):
             hr = (product_config.get("grid") or {}).get("hindcast_range")
             is_forecast = bool(date_range and hr and date_range[0] > hr[1])
-            base = f"{base}/{'forecast' if is_forecast else 'hindcast'}"
+            stream = "forecast" if is_forecast else "hindcast"
+            base = f"{base}/{stream}"
+        if isinstance(path_var, dict):
+            if stream is None:
+                raise ValueError("stream-specific path_name requires split_streams: true")
+            path_var = path_var[stream]
         return f"{base}/{path_var}"
 
     def _process(self, ds, native, config, date_range=None, region=None):
