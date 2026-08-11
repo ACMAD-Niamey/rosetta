@@ -1480,12 +1480,11 @@ nmme/cansipsic4:
   variables:
     precip:
       native_name: pr
-      # CCSR's CanSIPS paths differ by stream, though both datasets contain pr:
-      # the hindcast remains .../hindcast/prcp while the forecast was renamed
-      # to .../forecast/pr.
-      path_name:
-        hindcast: prcp
-        forecast: pr
+      # ECCC finished the CMOR migration (verified live 2026-08-11): BOTH
+      # streams now serve .../pr and the old .../hindcast/prcp path 404s, so
+      # the interim per-stream path_name override is gone. If the server
+      # flip-flops again, normalize's declared-name fallback keeps cached and
+      # fresh data readable either way.
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
       # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
