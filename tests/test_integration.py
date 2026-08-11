@@ -138,7 +138,13 @@ def test_fetch_nmme_ccsm4_precip():
         verbose=True,
     )
     _check_dataset(ds, "precip", REGION)
-    assert ds["precip"].attrs["units"] == "mm/day"
+    # CCSR serves monthly-TOTAL precip (mm), not a daily rate — the catalog
+    # contract (target_units: mm) was verified against the server 2026-06;
+    # this assertion was stale from the earlier mm/day era. The magnitude
+    # band would catch a real served-units regression, not just a relabel.
+    assert ds["precip"].attrs["units"] == "mm"
+    _mean = float(ds["precip"].mean())
+    assert 5.0 < _mean < 500.0, f"monthly-total magnitude off: {_mean}"
     assert "member" in ds.dims
 
 
@@ -172,7 +178,13 @@ def test_fetch_nmme_geoss2s_precip():
         verbose=True,
     )
     _check_dataset(ds, "precip", REGION)
-    assert ds["precip"].attrs["units"] == "mm/day"
+    # CCSR serves monthly-TOTAL precip (mm), not a daily rate — the catalog
+    # contract (target_units: mm) was verified against the server 2026-06;
+    # this assertion was stale from the earlier mm/day era. The magnitude
+    # band would catch a real served-units regression, not just a relabel.
+    assert ds["precip"].attrs["units"] == "mm"
+    _mean = float(ds["precip"].mean())
+    assert 5.0 < _mean < 500.0, f"monthly-total magnitude off: {_mean}"
     assert "member" in ds.dims
 
 
