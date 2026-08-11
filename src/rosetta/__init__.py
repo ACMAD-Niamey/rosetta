@@ -37,7 +37,7 @@ _os.environ.setdefault("NUTHATCH_ROOT_FILESYSTEM", _cache_uri)
 _os.environ.setdefault("NUTHATCH_LOCAL_FILESYSTEM", _cache_uri)
 
 from . import catalog
-from .fetch import fetch, parse_target, parse_init
+from .fetch import fetch, parse_target, parse_init, season_to_months
 from .cpc_nmme import cpc_nmme_predictor  # noqa: F401
 from .assemble import assemble, obs_predictor
 from .zonal import zonal
@@ -48,6 +48,7 @@ __all__ = [
     "fetch",
     "zonal",
     "parse_target",
+    "season_to_months",
     "parse_init",
     "assemble",
     "obs_predictor",

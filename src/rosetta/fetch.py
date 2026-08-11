@@ -54,6 +54,40 @@ SEASON_MONTHS = {
     "ASO": (8, 10), "SON": (9, 11), "OND": (10, 12), "NDJ": (11, 1),
 }
 
+_MONTH_INITIALS = "JFMAMJJASOND"
+
+
+def season_to_months(code):
+    """(start_month, end_month) for a contiguous month-initial season code.
+
+    Accepts the classic 3-month codes ("MAM", "OND", ...) and ANY contiguous
+    run of 2-12 month initials — e.g. "JJAS" (Jun-Sep, the 4-month season the
+    Sahel/GHA outlooks use), "ND" (Nov-Dec), "NDJF" (Nov-Feb, wraparound).
+    The run is matched circularly against the month-initial sequence
+    JFMAMJJASOND; every valid contiguous run of two or more months has exactly
+    one starting position, so codes are unambiguous. Raises ``ValueError`` for
+    unknown codes (single letters are ambiguous by construction: J, M, A).
+    """
+    code_u = str(code).upper()
+    if code_u in SEASON_MONTHS:
+        return SEASON_MONTHS[code_u]
+    n = len(code_u)
+    if not (2 <= n <= 12) or any(c not in _MONTH_INITIALS for c in code_u):
+        raise ValueError(
+            f"Unknown season code {code!r}: expected a contiguous run of 2-12 "
+            "month initials (e.g. 'MAM', 'JJAS', 'NDJF')."
+        )
+    doubled = _MONTH_INITIALS * 2
+    starts = [i for i in range(12) if doubled[i:i + n] == code_u]
+    if len(starts) != 1:
+        raise ValueError(
+            f"Season code {code!r} does not name a contiguous month run "
+            f"(matches {len(starts)} starting months)."
+        )
+    s = starts[0] + 1
+    e = ((starts[0] + n - 1) % 12) + 1
+    return (s, e)
+
 
 def _log(verbose, msg):
     if verbose:
@@ -78,10 +112,10 @@ def _set_nuthatch_verbosity(verbose):
 def parse_target(target, year=None):
     if isinstance(target, tuple) and len(target) == 2:
         return target
-    if isinstance(target, str) and target.upper() in SEASON_MONTHS:
+    if isinstance(target, str):
         from datetime import datetime
         import calendar
-        s, e = SEASON_MONTHS[target.upper()]
+        s, e = season_to_months(target)   # any contiguous month run, e.g. "JJAS"
         y = year or datetime.now().year
         y_end = y + (1 if e < s else 0)
         return (datetime(y, s, 1), datetime(y_end, e, calendar.monthrange(y_end, e)[1]))
@@ -460,7 +494,7 @@ def fetch(product, variable, init=None, target=None, region=None,
         for name, da in list(clean.data_vars.items()):
             if "time" in da.dims:
                 if target is not None:
-                    s, e = SEASON_MONTHS[target.upper()]
+                    s, e = season_to_months(target)
                     sel_months = [((s - 1 + k) % 12) + 1 for k in range((e - s) % 12 + 1)]
                     sub = da.sel(time=da.time.dt.month.isin(sel_months))
                     if e < s:
