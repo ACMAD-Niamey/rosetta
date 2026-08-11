@@ -210,6 +210,47 @@ def sanitize_for_netcdf(ds):
     return xr.Dataset(data_vars, coords=coords, attrs=attrs)
 
 
+def _resolve_native_name(ds, var_cfg, variable):
+    """The dataset's name for ``variable``, tolerant of source-side renames.
+
+    Tries every name the catalog declares (``native_name``, ``short_name``,
+    ``path_name`` — including per-stream dict forms) in order. Sources rename
+    variables under us (CCSR's CMOR migration: ``prcp`` -> ``pr`` -> paths too),
+    and locally CACHED raw data keeps whatever name it had when fetched, so a
+    single hard-coded name breaks on either skew. If no declared name matches
+    but the dataset has exactly ONE data variable, use it with a warning; only
+    a genuinely ambiguous dataset raises, with a stale-cache hint.
+    """
+    import warnings
+
+    candidates = []
+    for key in ("native_name", "short_name", "path_name"):
+        val = var_cfg.get(key)
+        if isinstance(val, dict):
+            candidates.extend(v for v in val.values() if v)
+        elif val:
+            candidates.append(val)
+    for cand in candidates:
+        if cand in ds:
+            return cand
+    data_vars = list(ds.data_vars)
+    if len(data_vars) == 1:
+        warnings.warn(
+            f"normalize: none of the declared names {candidates} found for "
+            f"{variable!r}; using the dataset's only data variable "
+            f"{data_vars[0]!r}. The source may have renamed its variables since "
+            "the catalog (or since this data was cached).",
+            RuntimeWarning, stacklevel=3,
+        )
+        return data_vars[0]
+    raise ValueError(
+        f"normalize: cannot locate {variable!r}: none of the declared names "
+        f"{candidates} are in the dataset (data variables: {data_vars}). If this "
+        "came from the local cache, the source may have renamed variables since "
+        "it was cached — clear the stale entry under ~/.nuthatch and refetch."
+    )
+
+
 def normalize(ds, product_config, variable, region=None, geometry=None,
               boundary="center", year_index=False):
     ds = _decode_numeric_times(ds)
@@ -254,11 +295,8 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
         ds = reduced.expand_dims(member=[0])
 
     var_cfg = product_config["variables"][variable]
-    native = var_cfg["native_name"]
-    if native not in ds and "short_name" in var_cfg:
-        native = var_cfg["short_name"]
-    if native in ds:
-        ds = ds.rename({native: variable})
+    if variable not in ds:
+        ds = ds.rename({_resolve_native_name(ds, var_cfg, variable): variable})
 
     # Deaccumulate variables (e.g. CDS total_precipitation is accumulated from init)
     if var_cfg.get("accumulated") and "lead_time" in ds.dims:
