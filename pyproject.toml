@@ -1,6 +1,6 @@
 [project]
 name = "accord-rosetta"
-version = "0.1.13"
+version = "0.1.14"
 description = "Canonical data acquisition for seasonal climate forecasting"
 readme = "README.md"
 requires-python = ">=3.12"
