@@ -37,8 +37,18 @@ _FCST = f"{_HOST}/seasonal_nmme_forecast_in_cpt_format"
 # target season -> (IC month name, target-month lead label used in the CPC filenames)
 _SEASON = {"ASO": ("Jul", "8-10"), "SON": ("Aug", "9-11"), "OND": ("Sep", "10-12")}
 
-_CACHE = os.path.join(os.path.expanduser("~"), ".nuthatch", "rosetta", "cpc_nmme")
-os.makedirs(_CACHE, exist_ok=True)
+
+def _cache_dir():
+    """Pickle-cache directory under ~/.nuthatch/rosetta/cpc_nmme.
+
+    Created on every call (not at import). Import-time ``makedirs`` is not enough:
+    callers may replace ``~/.nuthatch`` after import (e.g. symlink onto a Shared
+    Drive in Colab), which drops any dirs created at import and leaves
+    ``open(..., "wb")`` failing with FileNotFoundError.
+    """
+    path = os.path.join(os.path.expanduser("~"), ".nuthatch", "rosetta", "cpc_nmme")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def _parse_cpt(text):
@@ -70,7 +80,10 @@ def _download(url):
 
 def _fetch_global(model, var, target, hindcast, forecast_year):
     ic, lead = _SEASON[target.upper()]
-    key = os.path.join(_CACHE, f"{model}_{var}_{ic}_{lead}_{hindcast[0]}-{hindcast[1]}_{forecast_year}.pkl")
+    key = os.path.join(
+        _cache_dir(),
+        f"{model}_{var}_{ic}_{lead}_{hindcast[0]}-{hindcast[1]}_{forecast_year}.pkl",
+    )
     if os.path.exists(key):
         with open(key, "rb") as f:
             d = pickle.load(f)
