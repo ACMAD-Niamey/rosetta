@@ -131,7 +131,8 @@ def test_different_products_call_adapter_separately():
 
     call_log = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None,
+                    init_date=None, target_months=None):
         call_log.append(product)
         if product == "obs/chirps-v3-daily-rhiza":
             return chirps_ds
@@ -158,7 +159,8 @@ def test_different_regions_call_adapter_separately():
 
     call_regions = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None,
+                    init_date=None, target_months=None):
         call_regions.append(region)
         ds = xr.Dataset(
             {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},
@@ -184,7 +186,8 @@ def test_different_date_ranges_call_adapter_separately():
 
     call_date_ranges = []
 
-    def fake_cached(product, variable, config, date_range, region, init_months=None, init_date=None):
+    def fake_cached(product, variable, config, date_range, region, init_months=None,
+                    init_date=None, target_months=None):
         call_date_ranges.append(date_range)
         ds = xr.Dataset(
             {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},
@@ -406,3 +409,78 @@ def test_import_resolves_local_root_and_no_remote_mirror(tmp_path):
               if fs.startswith(("gs://", "s3://", "http://", "https://"))]
     assert not remote, \
         f"no remote cache filesystem may be configured, found: {remote}"
+
+
+def test_cache_key_includes_target_months():
+    """The cache key must distinguish target seasons, not just init months."""
+    src = _read_fetch_src()
+    assert '"target_months"' in src, \
+        "cache_args must include 'target_months': the seasonal adapters reduce " \
+        "over lead inside the cached call, so OND and SON at the same init " \
+        "month would otherwise share one entry"
+
+
+def test_different_target_seasons_call_adapter_separately():
+    """Two target seasons at the SAME init month must not share a cache entry.
+
+    Regression test for the target-season collision: the seasonal adapters
+    collapse the lead axis for the requested season *inside* `_fetch_raw`
+    (ccsr averages the leads whose target month is in the season; opendap/s3
+    select `target_lead_months`), but `target` was absent from the cache key.
+    Observed live before the fix: CanSIPS-IC4 OND and SON, both from the same
+    August init and identical window/region, came back byte-identical.
+    """
+    import numpy as np
+    import xarray as xr
+    from unittest.mock import patch
+
+    seen = []
+
+    def fake_cached(product, variable, config, date_range, region, init_months=None,
+                    init_date=None, target_months=None):
+        seen.append(target_months)
+        ds = xr.Dataset(
+            {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},
+            coords={"lat": [0.0, 1.0], "lon": [30.0, 31.0]},
+        )
+        ds["precip"].attrs["units"] = "mm/day"
+        return ds
+
+    with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached):
+        from rosetta.fetch import fetch
+        common = dict(variable="precip", cache=True, init="2020-08",
+                      region=[-2, 2, 30, 35], hindcast=(1991, 2020))
+        fetch("nmme/cansipsic4", target="OND", **common)
+        fetch("nmme/cansipsic4", target="SON", **common)
+
+    assert len(seen) == 2, "each target season must produce its own cache lookup"
+    assert seen[0] == (10, 11, 12), f"OND should key on months 10-12, got {seen[0]}"
+    assert seen[1] == (9, 10, 11), f"SON should key on months 9-11, got {seen[1]}"
+    assert seen[0] != seen[1], \
+        "OND and SON at the same init month must produce DIFFERENT cache keys"
+
+
+def test_no_target_leaves_cache_key_unchanged():
+    """A fetch without `target` passes target_months=None, so obs cache keys
+    (which have no lead axis to collapse) are not invalidated by this fix."""
+    import numpy as np
+    import xarray as xr
+    from unittest.mock import patch
+
+    seen = []
+
+    def fake_cached(product, variable, config, date_range, region, init_months=None,
+                    init_date=None, target_months=None):
+        seen.append(target_months)
+        ds = xr.Dataset(
+            {"precip": (["lat", "lon"], np.ones((2, 2), dtype=np.float32))},
+            coords={"lat": [0.0, 1.0], "lon": [30.0, 31.0]},
+        )
+        ds["precip"].attrs["units"] = "mm/day"
+        return ds
+
+    with patch("rosetta.fetch._fetch_raw_cached", side_effect=fake_cached):
+        from rosetta.fetch import fetch
+        fetch("obs/chirps-v3-daily-rhiza", variable="precip", cache=True)
+
+    assert seen == [None], f"obs fetch should pass target_months=None, got {seen}"
