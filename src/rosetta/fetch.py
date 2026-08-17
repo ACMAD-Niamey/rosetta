@@ -32,18 +32,25 @@ def _fetch_raw(product: str, variable: str, config: dict,
 
 @cache(namespace="rosetta", version=str(_CACHE_VERSION), backend="basic",
        cache_args=["product", "variable", "date_range", "region", "init_months",
-                   "init_date"])
+                   "init_date", "target_months"])
 def _fetch_raw_cached(product: str, variable: str, config: dict,
                       date_range, region, init_months=None,
-                      init_date=None, reject_degenerate=False) -> xr.Dataset:
+                      init_date=None, target_months=None,
+                      reject_degenerate=False) -> xr.Dataset:
     """Nuthatch-cached wrapper around _fetch_raw.
 
     Cache key uses only the stable scalar arguments, not the full config dict,
     to avoid dict-hashing issues. init_months is included because it determines
     which seasonal slice is fetched; init_date is included because S2S
-    forecasts are keyed on a single issuance date. reject_degenerate is NOT a
-    cache arg — it only governs whether a fresh (cache-miss) response is
-    validated before being memoized, so it must not fork the key.
+    forecasts are keyed on a single issuance date. target_months is included
+    because the seasonal adapters reduce over lead INSIDE this cached call —
+    ccsr averages the leads whose target month falls in the season, opendap/s3
+    select `target_lead_months`, and the CDS adapter requests only the season's
+    leadtimes — so two different target seasons at the same init month would
+    otherwise collide and the second would silently be served the first's
+    lead-averaged data. reject_degenerate is NOT a cache arg — it only governs
+    whether a fresh (cache-miss) response is validated before being memoized,
+    so it must not fork the key.
     """
     return _fetch_raw(product, variable, config, date_range, region,
                       reject_degenerate=reject_degenerate)
@@ -301,6 +308,10 @@ def fetch(product, variable, init=None, target=None, region=None,
 
     date_range = hindcast
     cache_init_date = None
+    # Calendar months of the requested target season. Part of the cache key: the
+    # seasonal adapters collapse the lead axis for this season inside the cached
+    # call, so the key has to distinguish OND from SON at the same init month.
+    cache_target_months = None
 
     if months is not None:
         if init is not None:
@@ -417,6 +428,7 @@ def fetch(product, variable, init=None, target=None, region=None,
                     config["leadtime_month"] = lead_months
             config["target_lead_months"] = lead_months
             config["target_range"] = target_range
+            cache_target_months = tuple(target_months)
 
     # Resolve the region once: adapters and the cache key see only the bbox
     # (stable, hashable); the optional polygon geometry is applied as the final
@@ -457,7 +469,8 @@ def fetch(product, variable, init=None, target=None, region=None,
                 raw = _fetch_raw_cached(
                     product, variable, config, date_range, fetch_bbox,
                     init_months=tuple(config.get("init_months", [])),
-                    init_date=cache_init_date, **extra,
+                    init_date=cache_init_date,
+                    target_months=cache_target_months, **extra,
                 )
                 if want_reject:
                     reject_if_degenerate(raw, variable, f"rosetta.fetch({product!r}) [cached]",
