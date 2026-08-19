@@ -288,6 +288,11 @@ def fetch(product, variable, init=None, target=None, region=None,
     _log(verbose, f"fetch start: product={product}, variable={variable}")
 
     config = dict(catalog.get(product))
+    # Capability check first: a variable the product doesn't carry is a static
+    # catalog fact, so it must fail here — typed, and before a byte crosses the
+    # network — rather than as a bare KeyError from inside whichever adapter
+    # runs. See rosetta.errors.VariableNotSupported.
+    catalog.require_variable(product, variable, config=config)
     config["_verbose"] = verbose
     config["_progress"] = progress
     config["_allow_partial"] = allow_partial

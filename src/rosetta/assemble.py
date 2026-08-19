@@ -1,5 +1,6 @@
 """Multi-model fan-out over fetch: assemble aligned {label: (hindcast, forecast)}."""
 from __future__ import annotations
+from . import catalog
 from .fetch import fetch
 
 
@@ -32,6 +33,19 @@ def assemble(roster, variable, *, init, target, region=None, grid_res=None,
     Returns `{label: (hindcast, forecast)}`. Per-row fetch failures are not
     swallowed here (caller decides); raises on first failure.
     """
+    roster = list(roster)
+    # Validate the whole roster before fetching anything: fan-out is sequential,
+    # so checking only inside fetch() would still download every model preceding
+    # an unsupported one before failing. Deliberately a *capability* check only —
+    # an id that isn't in the catalog at all is left to fetch() to report, so this
+    # adds no failure mode that didn't already exist.
+    for row in roster:
+        try:
+            config = catalog.get(row[1])
+        except KeyError:
+            continue
+        catalog.require_variable(row[1], variable, config=config)
+
     common = dict(init=init, target=target, region=region, grid_res=grid_res,
                   regrid_to=regrid_to, seasonal=seasonal, cache=cache,
                   verbose=verbose, boundary=boundary, year_index=True)
