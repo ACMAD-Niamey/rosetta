@@ -1,6 +1,6 @@
 # Rosetta API reference
 
-Import name is `rosetta` (distribution: `accord-rosetta`). Top-level exports: `catalog`, `fetch`, `zonal`, `parse_target`, `parse_init`, `assemble`, `obs_predictor`, `check_product`, `check_all_products`.
+Import name is `rosetta` (distribution: `accord-rosetta`). Top-level exports: `catalog`, `fetch`, `zonal`, `parse_target`, `parse_init`, `assemble`, `obs_predictor`, `check_product`, `check_all_products`, `VariableNotSupported`.
 
 At import time rosetta pins the nuthatch cache root via `os.environ.setdefault("NUTHATCH_ROOT_FILESYSTEM", ...)` / `NUTHATCH_LOCAL_FILESYSTEM` to `file://<ROSETTA_CACHE_DIR or ~/.nuthatch/caches>`. Set `ROSETTA_CACHE_DIR` **before** importing rosetta to relocate the cache.
 
@@ -48,6 +48,7 @@ def fetch(product, variable, init=None, target=None, region=None,
 
 Behavioral notes:
 
+- Requesting a variable the product's catalog entry does not declare raises `VariableNotSupported` **before any network I/O** (see Exceptions below).
 - Requesting `region` on a product whose normalized output has no `lat`/`lon` dims raises `ValueError` (station/tabular data cannot be spatially subset).
 - Polygon geometries are applied as a **final NaN mask** in normalization; the upstream request and the cache key only see the bbox. Two requests with the same bbox but different polygons share cached raw data.
 - Deprecated products and aliases emit `DeprecationWarning` when resolved.
@@ -136,7 +137,24 @@ Returns the same type as `data` with `lat`/`lon` replaced by `dim`; output **mir
 ## `catalog` module
 
 - `catalog.list_products(include_deprecated=True) -> list[str]` — all catalog product ids; `include_deprecated=False` filters aliases and date-deprecated entries.
+- `catalog.variables(product_name) -> list[str]` — the variable names a product declares, in catalog order.
+- `catalog.require_variable(product_name, variable, config=None)` — raises `VariableNotSupported` unless the product declares `variable`. Pass an already-resolved `config` to reuse it (and avoid re-emitting an alias `DeprecationWarning`). Used by `fetch()` and by `assemble()`'s roster precheck.
 - `catalog.info(product_name) -> dict` (alias: `catalog.get`) — resolved config for a product. Follows `alias_of` chains (emitting `DeprecationWarning`), adds a computed `deprecated` bool (from `deprecated_after` vs today). Raises `KeyError` for unknown products. Config keys of interest: `adapter`, `variables` (each with `native_name`, `units`, `target_units`, optional `accumulated`, `fill_value`), `grid`, `hindcast`/`forecast` ranges, `member_reduce`, `request_interval`, `max_workers`.
+
+## Exceptions (`rosetta.errors`)
+
+- `VariableNotSupported(ValueError)` — the product's catalog entry does not declare the requested variable. Attributes: `product`, `variable`, `available` (list of the variables it does serve). Raised by `fetch()` before any network I/O, and by `assemble()` for the **whole roster** before the first fetch — so one unsupported model does not cost the earlier models' downloads.
+
+  It exists so callers can separate a **capability gap** (permanent; this product will never serve this variable — deselect it) from an **availability gap** (transient; this init/target isn't published yet — retry or pick another season), without string-matching a bare `KeyError`:
+
+  ```python
+  try:
+      ds = rosetta.fetch(pid, "precip", init="2025-09", target="OND")
+  except rosetta.VariableNotSupported as e:
+      log.info("%s cannot serve %s (serves %s) - skipping", e.product, e.variable, e.available)
+  ```
+
+  A `ValueError` subclass, since it reports a statically-answerable request error rather than an I/O failure. Note `assemble()`'s precheck is a *capability* check only: a product id absent from the catalog is still reported by `fetch()` as `KeyError`, unchanged.
 
 ## Health checks (`health.py`)
 

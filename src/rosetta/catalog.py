@@ -2,6 +2,8 @@ import yaml
 from datetime import date
 from pathlib import Path
 
+from .errors import VariableNotSupported
+
 _CATALOG_PATH = Path(__file__).parent / "catalog.yaml"
 with open(_CATALOG_PATH) as f:
     _catalog = yaml.safe_load(f)
@@ -66,3 +68,23 @@ def info(product_name: str) -> dict:
 
 
 get = info
+
+
+def variables(product_name: str) -> list[str]:
+    """The variable names a product declares, in catalog order."""
+    return list(info(product_name).get("variables") or {})
+
+
+def require_variable(product_name: str, variable: str, config: dict | None = None):
+    """Raise :class:`VariableNotSupported` unless the product declares ``variable``.
+
+    The catalog knows statically which variables a product carries, so a
+    capability mismatch can be reported before any network I/O — and typed, so
+    callers can tell it apart from a transient availability gap. Pass an
+    already-resolved ``config`` to reuse it (and avoid re-emitting a
+    deprecation warning for aliased products).
+    """
+    cfg = info(product_name) if config is None else config
+    available = list(cfg.get("variables") or {})
+    if variable not in available:
+        raise VariableNotSupported(product_name, variable, available)
