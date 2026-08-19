@@ -158,8 +158,9 @@ Returns the same type as `data` with `lat`/`lon` replaced by `dim`; output **mir
 
 ## Health checks (`health.py`)
 
-- `check_product(product, probe_remote=False) -> dict` — keys: `product`, `adapter`, `checked_at` (UTC ISO), `healthy` (bool), `kind` (`"config" | "remote" | "transient" | "runtime"`), `message`, plus adapter-specific fields. Returns early with a `pending_url` message when the catalog marks a product as not yet live. `probe_remote=True` also opens/pings the live source.
-- `check_all_products(probe_remote=False) -> list[dict]` — iterates the whole catalog, converting exceptions into `kind="runtime"` failures.
+- `check_product(product, probe_remote=False, variable=None) -> dict` — keys: `product`, `adapter`, `checked_at` (UTC ISO), `healthy` (bool), `kind` (`"config" | "remote" | "transient" | "runtime" | "capability"`), `message`, plus adapter-specific fields. Returns early with a `pending_url` message when the catalog marks a product as not yet live. `probe_remote=True` also opens/pings the live source.
+  - `variable=<name>` also checks the product can serve it. A variable the catalog does not declare returns `kind="capability"`, `healthy=False`, plus `variable` and `available` keys — reported *distinctly* from a `config` problem or a `remote`/`transient` outage, which is the distinction between "deselect this product" and "retry later". Answerable from the catalog alone, so it never costs a remote probe even with `probe_remote=True`. Unlike `fetch()`, this **returns** the mismatch rather than raising `VariableNotSupported` — health checks report, they do not throw.
+- `check_all_products(probe_remote=False, variable=None) -> list[dict]` — iterates the whole catalog, converting exceptions into `kind="runtime"` failures. `variable` is threaded through, so this doubles as a capability sweep ("which products can serve precip?").
 
 ## `validate` module (not re-exported; `from rosetta import validate`)
 

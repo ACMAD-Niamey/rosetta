@@ -196,3 +196,80 @@ def test_assemble_precheck_defers_unknown_products_to_fetch(monkeypatch):
         assemble_mod.assemble([("A", "nmme/definitely-not-a-product", (1993, 1995))],
                               "precip", init="2026-01", target="MAM")
     assert reached == ["nmme/definitely-not-a-product"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #5, item 3: health checks report a capability mismatch distinctly,
+# rather than conflating it with a config or remote failure.
+# ---------------------------------------------------------------------------
+
+def test_check_product_reports_capability_mismatch_distinctly():
+    import rosetta
+    product, variable = UNSUPPORTED
+    status = rosetta.check_product(product, variable=variable)
+    assert status["healthy"] is False
+    assert status["kind"] == "capability"
+    assert status["variable"] == variable
+    assert status["available"] == ["sst"]
+    assert "sst" in status["message"]
+
+
+def test_check_product_capability_result_keeps_the_standard_shape():
+    """Callers iterate these dicts uniformly, so the usual keys must be present."""
+    import rosetta
+    product, variable = UNSUPPORTED
+    status = rosetta.check_product(product, variable=variable)
+    for key in ("product", "adapter", "checked_at", "healthy", "kind", "message",
+                "probe_remote"):
+        assert key in status, key
+    assert status["kind"] == "capability"   # else this asserts nothing specific
+    assert status["product"] == product
+    assert status["adapter"] == "ccsr"      # reported even though nothing was probed
+
+
+def test_check_product_capability_mismatch_does_not_probe_remote(monkeypatch):
+    """A permanent capability gap is answerable from the catalog alone — it must
+    never cost a network probe, even when probe_remote=True."""
+    import sys
+    import rosetta
+    import rosetta.health  # noqa: F401
+    health_mod = sys.modules["rosetta.health"]
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("no adapter probe for a capability mismatch")
+
+    monkeypatch.setattr(health_mod, "get_adapter", _boom)
+
+    product, variable = UNSUPPORTED
+    status = rosetta.check_product(product, variable=variable, probe_remote=True)
+    assert status["kind"] == "capability"
+
+
+def test_check_product_with_a_supported_variable_still_checks_health():
+    import rosetta
+    status = rosetta.check_product("nmme/spearb", variable="sst")
+    assert status["kind"] != "capability"
+    assert status["healthy"] is True
+
+
+def test_check_product_without_a_variable_is_unchanged():
+    """Backwards compatibility: the variable argument is opt-in."""
+    import rosetta
+    without = rosetta.check_product("nmme/spearb")
+    explicit_none = rosetta.check_product("nmme/spearb", variable=None)
+    # checked_at is a wall-clock stamp; everything else must match exactly
+    without.pop("checked_at"), explicit_none.pop("checked_at")
+    assert without == explicit_none
+    assert "variable" not in without
+
+
+def test_check_all_products_threads_the_variable_through():
+    import warnings
+    import rosetta
+    with warnings.catch_warnings():
+        # deprecated aliases warn on resolution; that is not what this asserts
+        warnings.simplefilter("ignore", DeprecationWarning)
+        statuses = {s["product"]: s
+                    for s in rosetta.check_all_products(variable="precip")}
+    assert statuses["nmme/spearb"]["kind"] == "capability"
+    assert statuses["nmme/cfsv2"]["kind"] != "capability"
