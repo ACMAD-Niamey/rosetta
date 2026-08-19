@@ -30,6 +30,7 @@ common = dict(
 
 ds_center = fetch(**common, boundary="center")
 ds_cover = fetch(**common, boundary="cover", region_buffer=1.5)
+# Because this is targeted NMME precipitation, both datasets are in mm.
 
 # Cells outside the polygon are NaN; "cover" keeps a wider fringe than "center".
 print("center cells:", int(ds_center["precip"].notnull().sum()))

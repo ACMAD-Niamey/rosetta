@@ -6,7 +6,7 @@ The catalog lives at `src/rosetta/catalog.yaml`. Enumerate at runtime with `cata
 
 | Product | Adapter | Variables | Notes |
 |---|---|---|---|
-| `nmme/cfsv2` | opendap (IRI DL) | precip, temp, sst | 1° global; split+append hindcast [1982-2011] / forecast [2011-now]; `member_reduce`: mean of first 24 of 28 members, re-expanded to `member=[0]` |
+| `nmme/cfsv2` | opendap (IRI DL) | precip, temp, sst | 1° global; split+append hindcast [1982-2011] / forecast [2011-now]; targeted precip rate converted to seasonal `mm`; 24 populated members preserved (4 all-NaN trailing slots removed) |
 | `nmme/ccsm4` | ccsr | precip, temp, sst | `single_year_fetch`; native names prcp/t2m/sst |
 | `nmme/cesm1` | ccsr | precip, temp, sst | `single_year_fetch`; hindcast [1982-2026], forecast [2017-now] |
 | `nmme/geoss2s` | ccsr | precip, temp, sst | split streams, `single_year_fetch`; forecast M=10, hindcast M=4 (ends 2017) |
@@ -22,8 +22,8 @@ CanSIPS-IC4 precipitation uses different CCSR dataset paths by stream: `hindcast
 
 Two practical caveats from operational use:
 
-- **Real-time vs hindcast availability differ per model and drift over time** — a model can have a full 1991-2020 hindcast but publish no current-month forecast (SPEAR in mid-2026), or a hindcast too short for a 30-year baseline (GEOSS2S ends 2017). Probe before committing a roster: `check_product(p, probe_remote=True)` or a cheap single-year fetch of the current init. CFSv2 sometimes returns a single (member-reduced) ensemble member — useless for spread-based calibration.
-- **CCSR precip has been observed as monthly totals (mm), not mm/day** — check `attrs["units"]` and see the units warning in `data-conventions.md` before mixing with rate-based products.
+- **Real-time vs hindcast availability differ per model and drift over time** — a model can have a full 1991-2020 hindcast but publish no current-month forecast (SPEAR in mid-2026), or a hindcast too short for a 30-year baseline (GEOSS2S ends 2017). Probe before committing a roster: `check_product(p, probe_remote=True)` or a cheap single-year fetch of the current init.
+- **Collapsed targeted precip is delivered in `mm`** — this is uniform across NMME, C3S/CDS, and IRI when using `year_index=True` or `assemble()`. Lead-resolved fetches retain per-step units. CFSv2 without `target=` remains `mm/day` because no accumulation window exists.
 
 ## C3S seasonal models (`c3s/*`) — Copernicus CDS credentials (`~/.cdsapirc`)
 
@@ -32,6 +32,7 @@ All fetch precip/temp/sst, monthly or daily cadence via the `cds` adapter:
 `c3s/ecmwf`, `c3s/ecmwf-monthly`, `c3s/eccc-cansips`, `c3s/eccc-cansipsv3`, `c3s/eccc-daily`, `c3s/meteofrance`, `c3s/meteofrance-daily`, `c3s/cmcc`, `c3s/cmcc-daily`, `c3s/cmcc-sps4`, `c3s/cmcc-sps4-daily`, `c3s/dwd`, `c3s/dwd-daily`, `c3s/dwd-gcfs21`, `c3s/ukmo`, `c3s/ukmo-daily`, `c3s/jma`, `c3s/jma-cps2`.
 
 Notes:
+- `year_index=True` / `assemble()` calendar-weights monthly rates or sums deaccumulated daily leads, returning seasonal precipitation in `mm`. A lead-resolved fetch remains `mm/day`.
 - Each dataset's licence must be accepted once in the CDS web UI; a 403 error names the missing licence.
 - Some entries have retired real-time streams (hindcasts still fetch; no new forecasts) — check `catalog.info(p)` for `deprecated_after` / `deprecation_note`.
 - `c3s/ecmwf-seas51c` uses the **iridl** adapter (needs `~/.pycpt_dlauth`), is deprecated after 2026-04-30 with successor `c3s/ecmwf-monthly`, and carries precip/sst only.

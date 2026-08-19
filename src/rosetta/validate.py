@@ -75,7 +75,7 @@ class ValidationResult:
 # ---------------------------------------------------------------------------
 
 _VALUE_RANGES = {
-    "precip": (0.0, 500.0),      # mm/day
+    "precip": (0.0, 500.0),      # default rate range (mm/day)
     "temp": (-90.0, 70.0),       # Celsius
     "sst": (-3.0, 45.0),         # Celsius (ERSST valid_min/max)
 }
@@ -131,6 +131,8 @@ def check_structure(ds, product, variable, product_config=None):
     # Physically plausible values
     if variable in _VALUE_RANGES:
         lo, hi = _VALUE_RANGES[variable]
+        if variable == "precip" and da.attrs.get("units") == "mm":
+            hi = 5000.0  # accumulated target-season / multi-day precipitation
         vmin = float(da.min(skipna=True))
         vmax = float(da.max(skipna=True))
         plausible = vmin >= lo - 50 and vmax <= hi + 50

@@ -17,7 +17,8 @@ convention from the IRI Ingrid system the `opendap` adapter targets:
 Layout: ``<var>[S, M, L, Y, X]`` with ``target[S, L]``. The adapter decodes S,
 filters by year + init month, selects + averages the leads whose target month
 falls in the requested season, wraps longitude to [-180, 180], crops to the
-region, and hands ``S/M/Y/X`` to the normalize layer (which renames them to
+region, and hands ``S/M/Y/X`` to the
+normalize layer (which renames them to
 ``init_time/member/lat/lon`` and the native var to the canonical name).
 
 In July 2026 CCSR renamed its datasets to CMIP-style variables (``pr``,
@@ -188,7 +189,9 @@ class CCSRAdapter(AdapterBase):
             # mapping is identical across S; read it off the first init.
             keep = np.isin(tgt_month[0], target_months)
             if keep.any():
-                ds = ds.isel(L=np.where(keep)[0]).mean("L")
+                lead_indices = np.where(keep)[0]
+                ds = ds.isel(L=lead_indices)
+                ds = ds.mean("L", keep_attrs=True)
         ds = ds.drop_vars([v for v in ("target", "target_bnds") if v in ds.variables])
 
         # ---- longitude 0..360 -> [-180, 180], then crop to region ----

@@ -44,7 +44,7 @@ Canonical units are guaranteed by the normalize pipeline (see [data-conventions.
 
 | Variable | Units | Full field | Anomaly |
 |---|---|---|---|
-| `precip` | mm/day | sequential (`YlGnBu`, `viridis`), `vmin=0` | diverging `BrBG` (brown=dry, green=wet), `center=0` |
+| `precip` | collapsed seasonal (`year_index=True`/`assemble`): mm; lead-resolved/daily: usually mm/day | sequential (`YlGnBu`, `viridis`), `vmin=0` | diverging `BrBG` (brown=dry, green=wet), `center=0` |
 | `temp` | °C | `RdYlBu_r` | `RdBu_r`, `center=0` |
 | `sst` | K (mostly) | `RdYlBu_r` | `RdBu_r`, `center=0` |
 
@@ -55,7 +55,7 @@ xarray's `.plot(center=0)` picks symmetric limits automatically — use it for a
 ```python
 hc = fetch("nmme/cfsv2", "precip", init="2024-02", target="MAM",
            region=[-5, 15, 33, 48], hindcast=(1993, 2016),
-           year_index=True)["precip"]                 # (year, member, lat, lon)
+           year_index=True)["precip"]                 # (year, member, lat, lon), mm
 
 hc.sel(year=2016).plot(col="member", col_wrap=4, cmap="YlGnBu")  # ensemble spread at a glance
 hc.mean("member").plot(col="year", col_wrap=6, cmap="YlGnBu")    # interannual variability

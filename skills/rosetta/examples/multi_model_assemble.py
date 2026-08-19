@@ -27,10 +27,13 @@ models = assemble(
     grid_res=1.0,         # put every model on a common 1-degree grid
     boundary="cover",     # assemble's default: keep every touched cell
 )
+# All targeted precipitation tracks use the seasonal-total contract (mm),
+# regardless of whether their source is NMME, C3S/CDS, or IRI.
+# CFSv2 contributes its 24 populated members (empty upstream slots are dropped).
 
 for label, (hindcast, forecast) in models.items():
-    print(f"{label}: hindcast {dict(hindcast.sizes)}, forecast {dict(forecast.sizes)}")
-    # e.g. hindcast (year: 24, member: 1, lat: ..., lon: ...)
+    print(f"{label}: hindcast {dict(hindcast.sizes)}, forecast {dict(forecast.sizes)}, "
+          f"units={hindcast.attrs.get('units')}")
 
 # Hand straight to deepscale, e.g.:
 #   import deepscale as ds

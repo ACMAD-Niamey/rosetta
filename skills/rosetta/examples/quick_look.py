@@ -31,7 +31,7 @@ plt.close()
 
 # --- 2. Hindcast ensemble members for one year ----------------------------
 hc = fetch("nmme/cfsv2", "precip", init="2024-02", target="MAM", region=REGION,
-           hindcast=(1993, 2016), year_index=True)["precip"]  # (year, member, lat, lon)
+           hindcast=(1993, 2016), year_index=True)["precip"]  # (year, member, lat, lon), mm
 
 g = hc.sel(year=2016).plot(col="member", col_wrap=4, cmap="YlGnBu")
 g.fig.suptitle("CFSv2 MAM 2016 hindcast by member", y=1.02)

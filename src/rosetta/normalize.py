@@ -35,6 +35,50 @@ _CONVERSIONS = {
 }
 
 
+def _season_day_counts(init_time, target_range):
+    """Exact target-season length for every forecast initialization year."""
+    import calendar
+
+    start_month = target_range[0].month
+    end_month = target_range[1].month
+    months = (list(range(start_month, end_month + 1)) if start_month <= end_month
+              else list(range(start_month, 13)) + list(range(1, end_month + 1)))
+    counts = []
+    for init in init_time.values:
+        base_year = int(init.astype("datetime64[Y]").astype(int)) + 1970
+        init_month = int(init.astype("datetime64[M]").astype(int) % 12) + 1
+        target_start_year = base_year + (start_month < init_month)
+        counts.append(sum(
+            calendar.monthrange(target_start_year + (month < start_month), month)[1]
+            for month in months
+        ))
+    return xr.DataArray(counts, dims=("init_time",), coords={"init_time": init_time})
+
+
+def _season_month_day_counts(init_time, target_range, lead_time):
+    """Per-target-month day weights for monthly lead-resolved forecasts."""
+    import calendar
+
+    start_month = target_range[0].month
+    end_month = target_range[1].month
+    months = (list(range(start_month, end_month + 1)) if start_month <= end_month
+              else list(range(start_month, 13)) + list(range(1, end_month + 1)))
+    weights = []
+    for init in init_time.values:
+        base_year = int(init.astype("datetime64[Y]").astype(int)) + 1970
+        init_month = int(init.astype("datetime64[M]").astype(int) % 12) + 1
+        target_start_year = base_year + (start_month < init_month)
+        weights.append([
+            calendar.monthrange(target_start_year + (month < start_month), month)[1]
+            for month in months
+        ])
+    return xr.DataArray(
+        weights,
+        dims=("init_time", "lead_time"),
+        coords={"init_time": init_time, "lead_time": lead_time},
+    )
+
+
 def decode_months_since(units_str, vals):
     """Decode 'months since YYYY-MM-DD' values to (years, months) arrays.
 
@@ -277,11 +321,15 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
     if renames:
         ds = ds.rename(renames)
 
-    # Generic member-reduce knob: some products (e.g. NMME CFSv2's 28 PENTAD
-    # samples) need their ensemble collapsed to a fixed-size subset average
-    # before use, matching a legacy reference convention (CFSv2: average the
-    # first 24 of 28 members in native order). Catalog-driven and data-driven
-    # so it applies to any product that declares it; absent -> no reduction.
+    # Some sources expose fixed-width member coordinates with structurally
+    # empty trailing slots. Drop only members that are all-NaN across every
+    # variable dimension; populated ensemble spread is preserved unchanged.
+    if product_config.get("drop_empty_members") and "member" in ds.dims:
+        ds = ds.dropna("member", how="all")
+
+    # Generic member-reduce knob for products whose public contract explicitly
+    # requests a subset average. Catalog-driven and data-driven so it applies
+    # to any product that declares it; absent -> preserve all native members.
     # Runs right after `member` exists (renamed above) and before the
     # `year_index` reshape below, so it applies uniformly to plain and
     # year_index fetches alike.
@@ -305,10 +353,22 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
         ds[variable] = diffed
 
     src, tgt = var_cfg["units"], var_cfg["target_units"]
-    if (src, tgt) in _CONVERSIONS:
+    if var_cfg.get("season_total_conversion") and product_config.get("target_range"):
+        if "init_time" in ds.dims:
+            ds[variable] = ds[variable] * _season_day_counts(
+                ds["init_time"], product_config["target_range"])
+        else:
+            start, end = product_config["target_range"]
+            ds[variable] = ds[variable] * ((end - start).days + 1)
+    elif (src, tgt) in _CONVERSIONS:
         ds[variable] = _CONVERSIONS[(src, tgt)](ds[variable])
 
-    ds[variable].attrs["units"] = tgt
+    # A season-total product fetched without target= has no accumulation
+    # window, so retain its native rate and label rather than inventing a total.
+    ds[variable].attrs["units"] = (
+        src if var_cfg.get("season_total_conversion") and not product_config.get("target_range")
+        else tgt
+    )
 
     # Optional no-data sentinel masking. Some upstream sources (e.g.
     # CHIRPS via sheerwater's chirps_raw_live) return a numeric sentinel
@@ -347,6 +407,26 @@ def normalize(ds, product_config, variable, region=None, geometry=None,
             ds[coord].attrs["axis"] = attr
 
     if year_index and "init_time" in ds.dims:
+        # A collapsed target-season precipitation forecast has one public unit
+        # contract across adapter families: accumulated mm. Lead-resolved fetches
+        # retain their honest per-step units; this branch is specifically the
+        # year_index/assemble reduction boundary.
+        if (variable == "precip" and product_config.get("target_range")
+                and ds[variable].attrs.get("units") == "mm/day"):
+            if "lead_time" not in ds.dims:
+                ds[variable] = ds[variable] * _season_day_counts(
+                    ds["init_time"], product_config["target_range"])
+            elif (product_config.get("leadtime_month")
+                  and ds.sizes["lead_time"] == len(product_config["leadtime_month"])):
+                weights = _season_month_day_counts(
+                    ds["init_time"], product_config["target_range"], ds["lead_time"])
+                ds[variable] = (ds[variable] * weights).sum("lead_time", keep_attrs=True)
+            else:
+                # Daily CDS leads have already been deaccumulated to one value
+                # per 24 h; summing those values gives the target accumulation.
+                ds[variable] = ds[variable].sum("lead_time", keep_attrs=True)
+            ds[variable].attrs["units"] = "mm"
+
         years = ds["init_time"].dt.year.values.astype(int)
         ds = ds.assign_coords(init_time=years).rename({"init_time": "year"})
         if "lead_time" in ds.dims:
