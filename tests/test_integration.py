@@ -88,13 +88,14 @@ def test_fetch_nmme_cfsv2_routes_streams_and_forecast_sst():
     h = rosetta.fetch("nmme/cfsv2", "precip", init="2010-01", target="MAM",
                       region=REGION, cache=False, verbose=False)
     _check_dataset(h, "precip", REGION)
-    assert h["precip"].attrs["units"] == "mm/day"
-    assert "member" in h.dims
+    assert h["precip"].attrs["units"] == "mm"
+    assert h.sizes["member"] == 24
     # Forecast-year init via the SAME id -> .FORECAST stream.
     f = rosetta.fetch("nmme/cfsv2", "precip", init="2024-01", target="MAM",
                       region=REGION, cache=False, verbose=False)
     _check_dataset(f, "precip", REGION)
-    assert "member" in f.dims
+    assert f["precip"].attrs["units"] == "mm"
+    assert f.sizes["member"] == 24
     # Forecast sst -- previously unavailable; symmetric across streams now.
     s = rosetta.fetch("nmme/cfsv2", "sst", init="2024-01", target="MAM",
                       region=OCEAN, cache=False, verbose=False)
@@ -119,8 +120,8 @@ def test_cfsv2_jan_init_has_consecutive_years_incl_2011():
     yrs = [int(y) for y in da.year.values]
     assert yrs == [2009, 2010, 2011, 2012, 2013], yrs           # consecutive, 2011 present
     y11 = da.sel(year=2011)
-    assert float(np.isfinite(y11).mean()) > 0.9                  # real data, not NaN
-    assert 1.0 < float(np.nanmean(y11)) < 10.0                   # sane precip (~3.7 mm/day)
+    assert float(np.isfinite(y11).mean()) > 0.99                 # empty member slots removed
+    assert 90.0 < float(np.nanmean(y11)) < 900.0                # sane MAM total in mm
 
 
 # ── NCEI ─────────────────────────────────────────────────────────────────────
@@ -138,10 +139,6 @@ def test_fetch_nmme_ccsm4_precip():
         verbose=True,
     )
     _check_dataset(ds, "precip", REGION)
-    # CCSR serves monthly-TOTAL precip (mm), not a daily rate — the catalog
-    # contract (target_units: mm) was verified against the server 2026-06;
-    # this assertion was stale from the earlier mm/day era. The magnitude
-    # band would catch a real served-units regression, not just a relabel.
     assert ds["precip"].attrs["units"] == "mm"
     _mean = float(ds["precip"].mean())
     assert 5.0 < _mean < 500.0, f"monthly-total magnitude off: {_mean}"
@@ -178,10 +175,6 @@ def test_fetch_nmme_geoss2s_precip():
         verbose=True,
     )
     _check_dataset(ds, "precip", REGION)
-    # CCSR serves monthly-TOTAL precip (mm), not a daily rate — the catalog
-    # contract (target_units: mm) was verified against the server 2026-06;
-    # this assertion was stale from the earlier mm/day era. The magnitude
-    # band would catch a real served-units regression, not just a relabel.
     assert ds["precip"].attrs["units"] == "mm"
     _mean = float(ds["precip"].mean())
     assert 5.0 < _mean < 500.0, f"monthly-total magnitude off: {_mean}"
@@ -490,6 +483,30 @@ def test_fetch_c3s_ecmwf_precip():
     _check_dataset(ds, "precip", REGION)
     assert ds["precip"].attrs["units"] == "mm/day"
     assert "lead_time" in ds.dims
+
+
+@pytest.mark.integration
+@pytest.mark.network
+@pytest.mark.cds
+@pytest.mark.parametrize("product", ["c3s/ecmwf-monthly", "c3s/ecmwf"])
+def test_c3s_collapsed_seasonal_precip_is_mm(product):
+    """Monthly-rate and daily-deaccumulated CDS paths share the mm contract."""
+    ds = rosetta.fetch(
+        product=product,
+        variable="precip",
+        init="2000-01",
+        target="MAM",
+        region=[-1, 1, 36, 38],
+        hindcast=(2000, 2000),
+        year_index=True,
+        cache=False,
+        verbose=False,
+        progress=False,
+    )
+    da = ds["precip"]
+    assert da.attrs["units"] == "mm"
+    assert "year" in da.dims and "lead_time" not in da.dims
+    assert 10.0 < float(da.mean()) < 2000.0
 
 
 @pytest.mark.integration

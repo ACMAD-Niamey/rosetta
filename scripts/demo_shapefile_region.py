@@ -8,8 +8,9 @@ Shows the two boundary rules for shapefile region input side by side:
     boundary="cover"            -> every cell the border touches is kept, so the
                                    country is covered to its true edges
 
-Fetches NMME CFSv2 MAM precipitation (OPeNDAP — needs network, no credentials),
-plots both panels with the country outline overlaid, and writes a PNG.
+Fetches NMME CFSv2 MAM accumulated precipitation in mm (OPeNDAP — needs
+network, no credentials), plots both panels with the country outline overlaid,
+and writes a PNG.
 
 Usage:
     scripts/demo_shapefile_region.py                 # Kenya

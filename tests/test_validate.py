@@ -167,6 +167,13 @@ class TestCheckStructure:
         checks = check_structure(implausible_ds, "test/product", "precip")
         assert not checks["value_range"]["passed"]
 
+    def test_seasonal_mm_uses_accumulation_range(self, good_gcm_ds):
+        ds = good_gcm_ds.copy(deep=True)
+        ds["precip"][:] = 1000.0
+        ds["precip"].attrs["units"] = "mm"
+        checks = check_structure(ds, "test/product", "precip")
+        assert checks["value_range"]["passed"]
+
     def test_member_count_check(self, good_gcm_ds):
         # actual member count matches one of the two declared ensemble sizes
         config = {"grid": {"forecast_members": 25, "hindcast_members": 5}}

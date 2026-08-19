@@ -1,20 +1,16 @@
-"""Task A3: generic `member_reduce` catalog knob (CFSv2 first-24-mean).
-
-Pushes the CFSv2 "average the first 24 PENTAD members" special-case
-(run_pipeline.py:379-383: `da.isel(member=slice(0, 24)).mean("member")`)
-out of the consumer and into rosetta as a data-driven catalog knob so
-`rosetta.assemble` needs no CFSv2-specific code.
-"""
+"""Generic member reduction plus CFSv2's native-member contract."""
 import numpy as np
-import pandas as pd
 import xarray as xr
+from datetime import datetime
 
 from rosetta.normalize import normalize
+from rosetta import catalog
 
 
 def _member_ds(n_members, n_time=1):
     """A minimal (S, L, M, Y, X) NMME-style raw dataset with n_members members."""
-    s_vals = np.array([601.0])  # months since 1960-01-01 -> Feb 2010
+    # months since 1960-01-01 -> Feb 2010, Feb 2011, ...
+    s_vals = 601.0 + 12 * np.arange(n_time)
     l_vals = np.array([0.5])
     m_vals = np.arange(n_members)
     lat = np.arange(-2, 3, 1.0)
@@ -112,3 +108,57 @@ def test_member_reduce_absent_is_a_no_op():
     assert "member" in da.dims
     assert da.sizes["member"] == 28
     np.testing.assert_allclose(sorted(da["member"].values), np.arange(28))
+
+
+def test_cfsv2_catalog_preserves_all_usable_members():
+    """CFSv2 keeps its 24 populated members instead of averaging them."""
+    config = catalog.get("nmme/cfsv2")
+    assert "member_reduce" not in config
+    clean = normalize(_member_ds(28), config, "precip")
+    assert clean.sizes["member"] == 28
+    assert clean["precip"].attrs["units"] == "mm/day"
+
+
+def test_cfsv2_drops_only_structurally_empty_member_slots():
+    config = catalog.get("nmme/cfsv2")
+    raw = _member_ds(28)
+    raw["prec"].loc[{"M": [24, 25, 26, 27]}] = np.nan
+    clean = normalize(raw, config, "precip")
+    assert clean.sizes["member"] == 24
+    np.testing.assert_array_equal(clean.member.values, np.arange(24))
+
+
+def test_cfsv2_target_converts_daily_rate_to_season_total():
+    """A targeted CFSv2 rate is multiplied by the exact target day count."""
+    config = dict(catalog.get("nmme/cfsv2"))
+    config["target_range"] = (datetime(2010, 10, 1), datetime(2010, 12, 31))
+    raw = _member_ds(28)
+    raw["prec"][:] = 2.0
+
+    clean = normalize(raw, config, "precip")
+    assert clean["precip"].attrs["units"] == "mm"
+    np.testing.assert_allclose(clean["precip"].values, 184.0)
+
+
+def test_cfsv2_season_total_respects_each_hindcast_years_calendar():
+    """FMA has 90 days in leap-year 2012 and 89 in 2010/2011."""
+    config = dict(catalog.get("nmme/cfsv2"))
+    config["target_range"] = (datetime(2010, 2, 1), datetime(2010, 4, 30))
+    raw = _member_ds(1, n_time=3)
+    raw["prec"][:] = 1.0
+
+    clean = normalize(raw, config, "precip")
+    got = clean["precip"].isel(lead_time=0, member=0, lat=0, lon=0)
+    np.testing.assert_allclose(got.values, [89.0, 89.0, 90.0])
+
+
+def test_cfsv2_collapsed_rate_rolls_future_target_into_next_year():
+    config = dict(catalog.get("nmme/cfsv2"))
+    config["target_range"] = (datetime(2011, 2, 1), datetime(2011, 4, 30))
+    raw = _member_ds(1).assign_coords(S=[620.0]).mean("L", keep_attrs=True)  # Sep 2011 init
+    raw["S"].attrs["units"] = "months since 1960-01-01"
+    raw["prec"][:] = 1.0
+
+    clean = normalize(raw, config, "precip")
+    got = clean["precip"].isel(member=0, lat=0, lon=0)
+    np.testing.assert_allclose(got.values, [90.0])  # FMA 2012 includes leap day

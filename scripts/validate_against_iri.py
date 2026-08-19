@@ -5,7 +5,8 @@ Fetches ensemble-mean seasonal precipitation from rosetta and from IRI,
 then computes temporal and spatial Pearson correlations to reproduce the
 validation table from Emmett's comparison.
 
-Test setup: init=Feb, target=MAM (lead months 2,3,4), precip (mm/day).
+Test setup: init=Feb, target=MAM (lead months 2,3,4). All collapsed seasonal
+precipitation is compared in mm.
 
 Prerequisites:
   - IRI DL auth: ~/.pycpt_dlauth  (for C3S mirrors on IRI)
@@ -240,7 +241,8 @@ def fetch_iri_nmme(model_cfg, init_month, lead_months, region=None):
     region subset) so we only download the small result — much faster than
     raw OPeNDAP which would pull all members client-side.
 
-    Returns an xarray DataArray with dims (init_time, lat, lon) in mm/day.
+    Returns an xarray DataArray with dims (init_time, lat, lon) in seasonal mm,
+    matching rosetta's targeted-NMME contract.
     """
     import requests
 
@@ -316,6 +318,24 @@ def fetch_iri_nmme(model_cfg, init_month, lead_months, region=None):
     if renames:
         da = da.rename(renames)
 
+    # IRI's lead-averaged NMME precip is a daily rate. Rosetta converts a
+    # targeted NMME fetch to seasonal mm, so apply the same exact calendar
+    # duration to the independent reference (separately for every init year).
+    import calendar
+    day_counts = []
+    for init in da["init_time"].values:
+        init_year = int(init.astype("datetime64[Y]").astype(int)) + 1970
+        total = 0
+        for lead in lead_months:
+            month_index = init_month + lead - 1
+            year = init_year + (month_index - 1) // 12
+            month = (month_index - 1) % 12 + 1
+            total += calendar.monthrange(year, month)[1]
+        day_counts.append(total)
+    days = xr.DataArray(day_counts, dims="init_time", coords={"init_time": da.init_time})
+    da = da * days
+    da.attrs["units"] = "mm"
+
     return da
 
 
@@ -323,7 +343,7 @@ def fetch_iri_c3s(model_cfg, init_month, lead_months, region=None):
     """Fetch ensemble-mean seasonal forecast from IRI's C3S mirror.
 
     Uses the same Ingrid URL construction as the IRIDL adapter.
-    Returns an xarray DataArray with dims (S, Y, X) in mm/day.
+    Returns an xarray DataArray with dims (S, Y, X) in seasonal mm.
     """
     import requests
 
@@ -395,6 +415,23 @@ def fetch_iri_c3s(model_cfg, init_month, lead_months, region=None):
         renames["X"] = "lon"
     if renames:
         da = da.rename(renames)
+
+    # The IRI mirror returns a lead-averaged daily rate; match rosetta's
+    # collapsed seasonal-total contract with the exact calendar duration.
+    import calendar
+    day_counts = []
+    for init in da["init_time"].values:
+        init_year = int(init.astype("datetime64[Y]").astype(int)) + 1970
+        total = 0
+        for lead in lead_months:
+            month_index = init_month + lead - 1
+            year = init_year + (month_index - 1) // 12
+            month = (month_index - 1) % 12 + 1
+            total += calendar.monthrange(year, month)[1]
+        day_counts.append(total)
+    days = xr.DataArray(day_counts, dims="init_time", coords={"init_time": da.init_time})
+    da = da * days
+    da.attrs["units"] = "mm"
 
     print(f"  [iri] got {dict(da.sizes)}")
     return da
@@ -498,7 +535,7 @@ def fetch_rosetta_obs_sst(model_cfg, region=None):
 def fetch_rosetta(model_cfg, init_month, target, region=None):
     """Fetch ensemble-mean seasonal forecast via rosetta.
 
-    Returns an xarray DataArray with dims (init_time, lat, lon) in mm/day.
+    Returns an xarray DataArray with dims (init_time, lat, lon) in seasonal mm.
     """
     import rosetta
 
@@ -511,6 +548,7 @@ def fetch_rosetta(model_cfg, init_month, target, region=None):
         init=f"2010-{init_month:02d}",  # year only sets month; hindcast overrides years
         target=target,
         hindcast=(y0, y1),
+        year_index=True,
         region=region,
         verbose=False,
         progress=False,
@@ -518,6 +556,13 @@ def fetch_rosetta(model_cfg, init_month, target, region=None):
     )
 
     da = ds["precip"]
+
+    # Validation aligns against IRI's datetime init axis; year_index=True uses
+    # integer years, so restore the requested initialization month as dates.
+    if "year" in da.dims:
+        import pandas as pd
+        dates = pd.to_datetime([f"{int(y)}-{init_month:02d}-01" for y in da.year.values])
+        da = da.assign_coords(year=dates).rename({"year": "init_time"})
 
     # Ensemble mean
     if "member" in da.dims:

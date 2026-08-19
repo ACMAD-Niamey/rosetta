@@ -135,6 +135,13 @@ How to read the tables. Hindcast is each model's fixed reforecast period, not a 
 
 Several C3S entries pin a system version whose real-time stream has ended (a 2026 forecast init returns no data); they still fetch hindcasts. CMCC's live stream has moved to `c3s/cmcc-sps4`. JMA and UKMO do not yet have an active-forecast entry on their current systems (JMA CPS4, UKMO 605).
 
+Collapsed targeted seasonal precipitation (`year_index=True`, including
+`assemble()`) is delivered in `mm` across NMME, C3S/CDS, and IRI products.
+Lead-resolved fetches retain honest per-step units (usually `mm/day`). Monthly
+rates are calendar-weighted and daily amounts are summed. Native ensemble spread is preserved;
+`nmme/cfsv2` returns the 24 populated members and removes four structurally
+empty trailing slots exposed by the upstream endpoint.
+
 ### Seasonal forecast, NMME
 
 | Product | Model / system | Host | Adapter | Variables | Cadence | Members (F/H) | Hindcast | Forecast |

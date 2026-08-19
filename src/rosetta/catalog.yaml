@@ -55,7 +55,8 @@ nmme/cfsv2:
     precip:
       native_name: prec
       units: "mm/day"
-      target_units: "mm/day"
+      target_units: "mm"
+      season_total_conversion: true
     temp:
       native_name: tref
       units: K
@@ -64,18 +65,14 @@ nmme/cfsv2:
       native_name: sst
       units: K
       target_units: K
-  # Legacy Ingrid convention (M/(1)(24)RANGE + [M]/average): collapse the 28
-  # PENTAD_SAMPLES members to the mean of the first 24 (native member order)
-  # before use. Generic `member_reduce` knob (see normalize.py); any product
-  # may set this, absent -> no reduction (all members preserved).
-  member_reduce:
-    first: 24
-    op: mean
+  # The endpoint advertises M=28, but live HINDCAST and FORECAST responses have
+  # four structurally empty trailing slots. Preserve the 24 usable members.
+  drop_empty_members: true
   grid:
     lat_res: 1.0
     lon_res: 1.0
-    forecast_members: 28
-    hindcast_members: 28
+    forecast_members: 24
+    hindcast_members: 24
     hindcast_range: [1982, 2011]   # deliberately overlaps forecast_range at 2011, the true (month-granular) stream split -- see split_streams note above
     forecast_range: [2011, null]   # real-time, ongoing. Probe-verified: HINDCAST stream ends 2011-03, FORECAST starts 2011-04; both streams are fetched for 2011 and unioned (see _resolve_streams) so no inits are dropped
 
@@ -1167,7 +1164,8 @@ c3s/ecmwf-seas51c:
       iridl_name: prcp
       native_name: prcp
       units: "mm/day"
-      target_units: "mm/day"
+      target_units: "mm"
+      season_total_conversion: true
       iridl_unit_ops: "c%3A/1000/(mm%20m-1)/%3Ac/mul/c%3A/86400/(s%20day-1)/%3Ac/mul"
     sst:
       native_name: sst  # IRI OPeNDAP variable name — differs from CDS "sea_surface_temperature"
@@ -1410,8 +1408,6 @@ nmme/spear:
       native_name: pr
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
-      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
-      # scale-invariant, so this does not affect §8; the label is just honest.
       units: "mm"
       target_units: "mm"
     temp:
@@ -1487,8 +1483,6 @@ nmme/cansipsic4:
       # fresh data readable either way.
       # CCSR serves monthly-TOTAL precip (mm/month), not a daily rate — verified
       # 2026-06-04 via metadata (units attr "mm") + magnitude (EA MAM mean ~87 mm).
-      # MME output is in the predictand's units (CHIRPS mm/day) and CCA is
-      # scale-invariant, so this does not affect §8; the label is just honest.
       units: "mm"
       target_units: "mm"
     temp:

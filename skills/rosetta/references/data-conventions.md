@@ -11,7 +11,7 @@
    - Forecast init: `S`, `forecast_reference_time`, `indexing_time` -> `init_time`
    - Forecast lead: `L`, `forecastMonth`, `forecast_period`, `step` -> `lead_time`
    - Ensemble: `M`, `number` -> `member`
-5. **`member_reduce`** (catalog-driven) — e.g. CFSv2 averages the first 24 of 28 members (`{first: 24, op: mean}`), then re-expands to `member=[0]`.
+5. **Empty-member removal / `member_reduce`** (optional, catalog-driven) — products preserve populated native members. CFSv2 removes four structurally all-NaN trailing slots and returns its 24 usable members without averaging them. A separate `member_reduce` knob remains available for products whose public contract explicitly requests a subset reduction.
 6. **Variable rename** — `native_name` (or `short_name` fallback) -> canonical `precip`/`temp`/`sst`.
 7. **Deaccumulation** — if the catalog marks the variable `accumulated: true` and `lead_time` exists: `.diff("lead_time")` (CDS accumulated precip).
 8. **Unit conversion** (`_CONVERSIONS`):
@@ -26,20 +26,27 @@
    | mm/month | mm/day | ÷ 30.0 |
    | mm | mm/day | identity (already mm per 24 h) |
 
-   `da.attrs["units"]` is set to `target_units`.
+   Targeted CFSv2 precipitation uses a calendar-aware path: the selected
+   `mm/day` lead mean is multiplied by the exact target-season day count and
+   labeled `mm`. The count is computed separately for every initialization
+   year, so leap years are respected. Without `target=`, CFSv2 remains
+   `mm/day` because there is no accumulation window.
 
-   **Verify units in practice — conversion is attrs-driven and not bulletproof.** The `mm → mm/day` identity assumes "mm per 24 h" (true for deaccumulated S2S leads); a source serving *monthly totals* labeled `mm` passes through unconverted, and `mm/month ÷ 30` is an approximation. CCSR NMME precip has repeatedly been observed arriving as monthly totals (~100 mm where ERA5 says ~3 mm/day). Before mixing products, check `da.attrs["units"]` and sanity-check magnitudes against a known-rate product; convert totals exactly with days-per-month (`calendar.monthrange`). A cheap guard when looping over mixed rosters: treat the field as a rate only if `"day"`, `"/d"`, or `"d-1"` appears in the units string.
+   **Verify units in practice — conversion is catalog-driven.** Targeted NMME
+   products use `mm`; general daily/monthly observation and forecast products
+   may remain `mm/day`, while native pentad/dekad/annual accumulations remain
+   `mm`.
 9. **Fill-value masking** — catalog `fill_value` (e.g. -9999) -> NaN.
 10. **Latitude ascending** — `ds.sortby("lat")`. Canonical convention: lat always ascending.
 11. **Spatial selection** — polygon clip (`clip_to_geometry`, rioxarray `.rio.clip`, `all_touched = (boundary == "cover")`) when a geometry was given; otherwise bbox `.sel(lat=slice, lon=slice)` (cover mode expands by half a grid cell).
 12. **CF axis attributes** — `lat.axis="Y"`, `lon.axis="X"`, `time`/`init_time` `.axis="T"`.
-13. **`year_index`** — if requested and `init_time` is a dim: replaced by integer `year`, with a mean over `lead_time` (keep_attrs).
+13. **`year_index`** — if requested and `init_time` is a dim, replace it with integer `year` and collapse `lead_time`. Targeted precipitation has a uniform seasonal-total contract (`mm`): monthly `mm/day` rates are multiplied by each target month’s exact day count and summed; daily amounts are summed; server-averaged rates are multiplied by the exact season length. Other variables retain the lead-mean behavior.
 
 ## Canonical output schema
 
 - Coordinates: `lat`, `lon` (ascending lat, lon in [-180, 180]); `time` (obs, `datetime64`); `init_time` (forecasts, `datetime64`); `lead_time` (numeric, source-dependent units); `member` (integer ensemble index). With `year_index=True`: integer `year` replaces `init_time`.
 - Typical dims — forecasts: `(init_time, lead_time, member, lat, lon)`; observations: `(time, lat, lon)`; `assemble()` output: `(year, member, lat, lon)`.
-- Units: precip `mm/day` (native CHIRPS pentad/dekad/annual keep `mm` totals), temp `C`, sst mostly `K` (ERA5 sst is `C`).
+- Units: collapsed targeted seasonal forecasts (`year_index=True`/`assemble`) use precip `mm` across adapter families. Lead-resolved and daily precipitation generally remains `mm/day`; native CHIRPS pentad/dekad/annual products keep `mm` totals. Temp is `C`; sst is mostly `K` (ERA5 sst is `C`).
 
 ## Season strings
 

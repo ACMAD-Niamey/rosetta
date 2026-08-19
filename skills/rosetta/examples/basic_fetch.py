@@ -34,7 +34,7 @@ obs_mam = fetch(
 )
 
 # --- Seasonal hindcast: CFSv2 precip, Feb inits targeting MAM ------------
-# (init_time, lead_time, member, lat, lon), precip in mm/day
+# (init_time, lead_time, member, lat, lon), targeted seasonal precip in mm
 hcst = fetch(
     "nmme/cfsv2",
     "precip",

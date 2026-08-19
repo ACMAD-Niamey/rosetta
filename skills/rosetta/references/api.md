@@ -37,7 +37,7 @@ def fetch(product, variable, init=None, target=None, region=None,
 | `reforecast` | bool = False | Fetch the on-the-fly hindcast suite (S2S: switches to the `s2s-reforecasts` collection). |
 | `boundary` | `"center"` (default) \| `"cover"` | `"center"`: keep cells whose centre is inside the region (xarray/CDO convention). `"cover"`: keep every cell the region touches (`all_touched=True`). |
 | `region_buffer` | float = 1.5 (degrees) | Only used with `boundary="cover"`; pads the fetched bbox so edge cells aren't clipped. Must exceed half the grid spacing. |
-| `year_index` | bool = False | Reshape forecast `init_time` dim into an integer `year` dim and mean over `lead_time`. |
+| `year_index` | bool = False | Reshape forecast `init_time` into integer `year` and collapse `lead_time`. For targeted precipitation, monthly rates are calendar-weighted and daily amounts are summed to seasonal `mm`; other variables use a lead mean. |
 | `seasonal` | None \| `"mean"` | `"mean"`: subset the target season's months on `time` and average to one value per calendar year (`time` -> `year`). Requires `target`. Wraparound seasons (NDJ, DJF) raise `NotImplementedError`. |
 | `grid_res` | float \| None | Regrid onto a regular lat/lon grid at this resolution spanning `region` (via `.interp`). Requires `region`. Mutually exclusive with `regrid_to`. |
 | `regrid_to` | xr.DataArray \| None | Regrid onto this array's `lat`/`lon` coordinates. |
@@ -139,7 +139,7 @@ Returns the same type as `data` with `lat`/`lon` replaced by `dim`; output **mir
 - `catalog.list_products(include_deprecated=True) -> list[str]` — all catalog product ids; `include_deprecated=False` filters aliases and date-deprecated entries.
 - `catalog.variables(product_name) -> list[str]` — the variable names a product declares, in catalog order.
 - `catalog.require_variable(product_name, variable, config=None)` — raises `VariableNotSupported` unless the product declares `variable`. Pass an already-resolved `config` to reuse it (and avoid re-emitting an alias `DeprecationWarning`). Used by `fetch()` and by `assemble()`'s roster precheck.
-- `catalog.info(product_name) -> dict` (alias: `catalog.get`) — resolved config for a product. Follows `alias_of` chains (emitting `DeprecationWarning`), adds a computed `deprecated` bool (from `deprecated_after` vs today). Raises `KeyError` for unknown products. Config keys of interest: `adapter`, `variables` (each with `native_name`, `units`, `target_units`, optional `accumulated`, `fill_value`), `grid`, `hindcast`/`forecast` ranges, `member_reduce`, `request_interval`, `max_workers`.
+- `catalog.info(product_name) -> dict` (alias: `catalog.get`) — resolved config for a product. Follows `alias_of` chains (emitting `DeprecationWarning`), adds a computed `deprecated` bool (from `deprecated_after` vs today). Raises `KeyError` for unknown products. Config keys of interest: `adapter`, `variables` (each with `native_name`, `units`, `target_units`, optional `accumulated`, `fill_value`, `season_total_conversion`), `grid`, `hindcast`/`forecast` ranges, `drop_empty_members`, `member_reduce`, `request_interval`, `max_workers`.
 
 ## Exceptions (`rosetta.errors`)
 
@@ -167,7 +167,7 @@ Returns the same type as `data` with `lat`/`lon` replaced by `dim`; output **mir
 For checking rosetta output against independent references:
 
 - `ValidationResult` dataclass — fields include `product`, `variable`, `reference`, `r_timeseries`, `r_spatial`, `status`, `threshold=0.95`, `structural_checks`, `error`, `timestamp`; methods `passed()`, `to_report_entry()`.
-- `check_structure(ds, product, variable, product_config=None) -> dict` — variable presence, units attr, spatial dims, not-all-NaN, plausible value ranges (precip 0-500 mm/day, temp -90-70 C, sst -3-45 C, ±50 tolerance), member count vs catalog, hindcast range.
+- `check_structure(ds, product, variable, product_config=None) -> dict` — variable presence, units attr, spatial dims, not-all-NaN, unit-aware plausible value ranges (precip rates up to 500 mm/day; accumulated precip up to 5000 mm; temp -90-70 C; sst -3-45 C; ±50 tolerance), member count vs catalog, hindcast range.
 - `compare(rosetta_da, reference_da, threshold=0.95) -> (r_ts, r_spatial, status)` — regrids to a common grid, computes temporal and spatial Pearson correlations; status `PASS`/`CHECK`/`ERROR`.
 - `regrid_to_common(da1, da2)`, `compute_correlations(ros_da, ref_da)` (needs `(init_time, lat, lon)`), `validate_product(...)`, `write_report(results, path=None)` / `read_report(path=None)` (default `output/validation_report.json`).
 

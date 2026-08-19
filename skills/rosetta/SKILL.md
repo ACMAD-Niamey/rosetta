@@ -25,7 +25,7 @@ Rosetta is ACCORD's data adapter layer for seasonal climate forecasting. One cal
 | Forecast init | `init_time` | `datetime64` (integer `year` if `year_index=True`) |
 | Forecast lead | `lead_time` | numeric, source-dependent units |
 | Ensemble | `member` | integer index |
-| Variables | `precip`, `temp`, `sst` | precip `mm/day`, temp `C`, sst mostly `K` |
+| Variables | `precip`, `temp`, `sst` | collapsed seasonal precip (`year_index=True`/`assemble`) `mm`; lead-resolved/daily precip usually `mm/day`; temp `C`; sst mostly `K` |
 
 Typical shapes: forecasts `(init_time, lead_time, member, lat, lon)`; observations `(time, lat, lon)`; `assemble()` output `(year, member, lat, lon)`.
 
@@ -54,7 +54,7 @@ catalog.info("nmme/cfsv2")   # full config: variables, grid, streams, adapter
 - `target`: season string (`"MAM"`, `"OND"`, `"DJF"`, ...) or `(start_dt, end_dt)` tuple — drives lead-month selection.
 - `region`: bbox `[lat_s, lat_n, lon_w, lon_e]` (**lat first**), a `.shp` path, or a shapely/geopandas geometry.
 - `hindcast`: `(start_year, end_year)` — the fetch's year range.
-- `year_index=True`: reshape `init_time` → integer `year` and mean over `lead_time` (the shape deepscale consumes).
+- `year_index=True`: reshape `init_time` → integer `year` and collapse `lead_time` (the shape deepscale consumes). Targeted precipitation becomes an exact seasonal accumulation in `mm`: monthly rates are day-weighted; daily amounts are summed. Other variables use a lead mean.
 - `seasonal="mean"`: average obs over the target season per calendar year (`time` → `year`); wraparound seasons (NDJ/DJF) raise `NotImplementedError`.
 - `grid_res=1.0` or `regrid_to=some_da`: regrid (mutually exclusive; `grid_res` requires `region`).
 - `boundary`: `"center"` (default) or `"cover"` (keep every cell the region touches).
@@ -203,7 +203,7 @@ check_product("obs/era5", probe_remote=True) # also pings the live source
 - Deprecated products emit `DeprecationWarning` and alias to successors — check `catalog.info(p)["deprecated"]`.
 - S3 adapter shells out to the AWS **CLI**, not boto3 — `aws` must be configured.
 - If nuthatch tries to reach `gs://sheerwater-datalake/...` and 401s, ambient config is shadowing rosetta's — see troubleshooting.
-- **Verify units before mixing products**: unit conversion is attrs-driven; CCSR NMME precip has arrived as monthly totals (mm) rather than mm/day — check `attrs["units"]` and magnitudes (see data-conventions).
+- Collapsed targeted seasonal precipitation (`year_index=True` and `assemble()`) is uniformly delivered in `mm` for NMME, C3S/CDS, and IRI sources. Lead-resolved fetches keep per-step units. CFSv2 preserves its 24 populated members; four all-NaN upstream member slots are removed.
 - Real-time model availability drifts (hindcast present, live forecast absent) — probe with `check_product(p, probe_remote=True)` before committing a multi-model roster; `assemble()` raises on the first failing model by design.
 
 ## Runnable examples
