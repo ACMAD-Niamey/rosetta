@@ -1,6 +1,6 @@
 [project]
 name = "accord-rosetta"
-version = "0.1.14"
+version = "0.1.15"
 description = "Canonical data acquisition for seasonal climate forecasting"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,6 +26,15 @@ dependencies = [
     "tqdm",
     "rioxarray",
     "sheerwater>=0.2.5",
+    # Resolver guidance, not direct imports: these ride in via sheerwater ->
+    # earthaccess. Without floors, pip 25.2/25.3 (as shipped by Anaconda)
+    # explores the old earthaccess/s3fs/fsspec/aiobotocore version lattice for
+    # ~40 minutes and aborts with resolution-too-deep; either floor alone
+    # collapses the resolve to ~20s, both are kept as insurance. pip >= 26 and
+    # uv are unaffected either way.
+    "earthaccess>=0.18",
+    "s3fs>=2025.2",
+    "fsspec>=2025.2",
     "nuthatch>=0.4.9",
     "cfgrib>=0.9.15.1",
     "eccodeslib>=2.46.2.19",
